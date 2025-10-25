@@ -1317,7 +1317,7 @@ function Index() {
         }
         selectedDisplay={state.selectedDisplay}
         onSelectedDisplayChange={(display) =>
-          setState((prev) => ({ ...prev, selectedDisplay: display }))
+          setState((prev) => ({ ...prev, selectedDisplay: display, autoDetectDisplay: false }))
         }
         useFullscreen={state.useFullscreen}
         onUseFullscreenChange={(fullscreen) =>

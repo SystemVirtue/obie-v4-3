@@ -1685,29 +1685,6 @@ const DisplayControls: React.FC<DisplayControlsProps> = ({
     loadDisplays();
   }, [autoDetectDisplay, onSelectedDisplayChange, onUseFullscreenChange]);
 
-  // Move player window when selected display changes
-  useEffect(() => {
-    if (playerWindow && !playerWindow.closed && selectedDisplay) {
-      const display = availableDisplays.find((d) => d.id === selectedDisplay);
-      if (display) {
-        const command = {
-          action: 'moveWindow',
-          x: display.left,
-          y: display.top,
-          width: useFullscreen ? display.width : Math.floor(display.width * 0.8),
-          height: useFullscreen ? display.height : Math.floor(display.height * 0.8),
-          timestamp: Date.now(),
-        };
-        try {
-          localStorage.setItem('jukeboxCommand', JSON.stringify(command));
-          console.log('[DisplayControls] Sent move command to player window:', command);
-        } catch (e) {
-          console.warn('[DisplayControls] Could not send move command:', e);
-        }
-      }
-    }
-  }, [selectedDisplay, playerWindow, availableDisplays, useFullscreen]);
-
   // Toggle fullscreen when useFullscreen changes
   useEffect(() => {
     if (playerWindow && !playerWindow.closed) {
@@ -1829,17 +1806,7 @@ const DisplayControls: React.FC<DisplayControlsProps> = ({
             size="sm"
           >
             <ExternalLink className="w-4 h-4" />
-            Open on Selected Display
-          </Button>
-          <Button
-            onClick={() =>
-              displayManager.getDisplays().then(setAvailableDisplays)
-            }
-            className="flex items-center gap-2 bg-slate-600 hover:bg-slate-700"
-            size="sm"
-            variant="outline"
-          >
-            Refresh Displays
+            Reopen on Selected Display
           </Button>
         </div>
 

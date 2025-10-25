@@ -3,6 +3,8 @@ import { youtubeQuotaService, QuotaUsage } from "@/services/youtubeQuota";
 import { testApiKey, ApiKeyTestResult } from "@/utils/apiKeyTester";
 import { displayManager, DisplayInfo } from "@/services/displayManager";
 import { SearchMethod } from "@/services/musicSearch";
+import { AdminConsoleHealthCheck } from "@/components/AdminConsoleHealthCheck";
+import { PlaylistManager } from "@/components/PlaylistManager";
 import {
   Dialog,
   DialogContent,
@@ -22,6 +24,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Slider } from "@/components/ui/slider";
+import { Separator } from "@/components/ui/separator";
 import {
   Upload,
   Play,
@@ -41,7 +44,15 @@ import {
   ExternalLink,
   Maximize,
   Minimize,
+  Activity,
+  ListMusic,
 } from "lucide-react";
+
+/**
+ * CHANGELOG - Phase 3 Integration
+ * ADDED: Imports for AdminConsoleHealthCheck and PlaylistManager
+ * ADDED: Icons for new sections (Activity, ListMusic)
+ */
 
 // Helper function to clean title text by removing content in brackets
 const cleanTitle = (title: string): string => {
@@ -1235,6 +1246,121 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
                   ))}
                 </ScrollArea>
               </div>
+            </div>
+
+            {/**
+             * CHANGELOG - Phase 3 Integration
+             * ADDED: System Health Check Section
+             */}
+            <Separator className="my-6" />
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 mb-4">
+                <Activity className="w-5 h-5 text-primary" />
+                <h3 className="text-lg font-semibold text-slate-900">System Health</h3>
+              </div>
+              <AdminConsoleHealthCheck
+                playerWindow={playerWindow}
+                inMemoryPlaylist={currentPlaylistVideos}
+                priorityQueue={priorityQueue}
+                currentlyPlaying={currentlyPlaying}
+              />
+            </div>
+
+            {/**
+             * CHANGELOG - Phase 3 Integration
+             * ADDED: Custom Playlist Manager Section
+             */}
+            <Separator className="my-6" />
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 mb-4">
+                <ListMusic className="w-5 h-5 text-primary" />
+                <h3 className="text-lg font-semibold text-slate-900">Custom Playlists</h3>
+              </div>
+              <PlaylistManager onPlaylistSelect={onDefaultPlaylistChange} />
+            </div>
+
+            {/**
+             * CHANGELOG - Phase 3 Integration
+             * ADDED: Settings Export/Import Section
+             */}
+            <Separator className="my-6" />
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 mb-4">
+                <Settings2 className="w-5 h-5 text-primary" />
+                <h3 className="text-lg font-semibold text-slate-900">Settings Management</h3>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  onClick={() => {
+                    const settings = {
+                      version: "1.0",
+                      timestamp: new Date().toISOString(),
+                      preferences: localStorage.getItem('USER_PREFERENCES'),
+                      playlists: localStorage.getItem('CUSTOM_PLAYLISTS'),
+                    };
+                    
+                    const blob = new Blob([JSON.stringify(settings, null, 2)], { 
+                      type: 'application/json' 
+                    });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `jukebox-settings-${Date.now()}.json`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                  variant="outline"
+                  className="flex items-center gap-2"
+                >
+                  <Download className="w-4 h-4" />
+                  Export Settings
+                </Button>
+                <Button
+                  onClick={() => {
+                    const input = document.createElement('input');
+                    input.type = 'file';
+                    input.accept = 'application/json';
+                    input.onchange = (e) => {
+                      const file = (e.target as HTMLInputElement).files?.[0];
+                      if (!file) return;
+                      
+                      const reader = new FileReader();
+                      reader.onload = (event) => {
+                        try {
+                          const settings = JSON.parse(event.target?.result as string);
+                          
+                          if (settings.version !== "1.0") {
+                            alert("Incompatible settings version");
+                            return;
+                          }
+                          
+                          if (settings.preferences) {
+                            localStorage.setItem('USER_PREFERENCES', settings.preferences);
+                          }
+                          if (settings.playlists) {
+                            localStorage.setItem('CUSTOM_PLAYLISTS', settings.playlists);
+                          }
+                          
+                          alert("Settings imported successfully! Reloading page...");
+                          window.location.reload();
+                        } catch (error) {
+                          alert("Failed to import settings: Invalid file format");
+                        }
+                      };
+                      reader.readAsText(file);
+                    };
+                    input.click();
+                  }}
+                  variant="outline"
+                  className="flex items-center gap-2"
+                >
+                  <Upload className="w-4 h-4" />
+                  Import Settings
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Export your settings to backup or transfer to another device. Import will reload the page.
+              </p>
             </div>
           </div>
         </DialogContent>

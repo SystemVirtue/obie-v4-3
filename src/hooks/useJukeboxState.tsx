@@ -49,7 +49,10 @@ const loadUserPreferences = (): Partial<UserPreferences> => {
     const saved = localStorage.getItem("USER_PREFERENCES");
     if (saved) {
       const prefs = JSON.parse(saved);
-      console.log("[UserPreferences] Loaded from localStorage:", Object.keys(prefs).length, "settings");
+      // Only log in development to reduce console noise
+      if (process.env.NODE_ENV === 'development') {
+        console.log("[UserPreferences] Loaded from localStorage:", Object.keys(prefs).length, "settings");
+      }
 
       // Update cache
       userPreferencesCache = prefs;

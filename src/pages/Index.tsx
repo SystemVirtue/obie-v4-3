@@ -407,12 +407,15 @@ function Index() {
 
   // Initialize player only after playlist is loaded and ready
   useEffect(() => {
-    console.log("[Auto-init] Checking player initialization conditions:", {
-      playlistLength: state.defaultPlaylistVideos.length,
-      hasPlayerWindow: !!state.playerWindow,
-      isPlayerRunning: state.isPlayerRunning,
-      windowClosed: state.playerWindow?.closed,
-    });
+    // Only log in development and reduce frequency
+    if (process.env.NODE_ENV === 'development') {
+      console.log("[Auto-init] Checking player initialization conditions:", {
+        playlistLength: state.defaultPlaylistVideos.length,
+        hasPlayerWindow: !!state.playerWindow,
+        isPlayerRunning: state.isPlayerRunning,
+        windowClosed: state.playerWindow?.closed,
+      });
+    }
 
     // Check if playlist is empty but don't auto-open admin - let API key rotation handle it
     const hasEmptyPlaylist = state.defaultPlaylistVideos.length === 0;
@@ -524,16 +527,19 @@ function Index() {
   // Enhanced autoplay logic - start songs when playlist is ready
   const hasStartedFirstSongRef = useRef(false);
   useEffect(() => {
-    console.log("[Autoplay] Checking autoplay conditions:", {
-      inMemoryLength: state.inMemoryPlaylist.length,
-      priorityQueueLength: state.priorityQueue.length,
-      isPlayerRunning: state.isPlayerRunning,
-      isPlayerPaused: state.isPlayerPaused,
-      hasPlayerWindow: !!state.playerWindow,
-      windowClosed: state.playerWindow?.closed,
-      currentlyPlaying: state.currentlyPlaying,
-      hasStarted: hasStartedFirstSongRef.current,
-    });
+    // Only log in development and reduce frequency by checking if conditions actually changed
+    if (process.env.NODE_ENV === 'development') {
+      console.log("[Autoplay] Checking autoplay conditions:", {
+        inMemoryLength: state.inMemoryPlaylist.length,
+        priorityQueueLength: state.priorityQueue.length,
+        isPlayerRunning: state.isPlayerRunning,
+        isPlayerPaused: state.isPlayerPaused,
+        hasPlayerWindow: !!state.playerWindow,
+        windowClosed: state.playerWindow?.closed,
+        currentlyPlaying: state.currentlyPlaying,
+        hasStarted: hasStartedFirstSongRef.current,
+      });
+    }
 
     if (
       state.inMemoryPlaylist.length > 0 &&
@@ -586,12 +592,11 @@ function Index() {
       hasStartedFirstSongRef.current = false;
     }
   }, [
-    state.inMemoryPlaylist,
-    state.priorityQueue,
+    state.inMemoryPlaylist.length,
+    state.priorityQueue.length,
     state.isPlayerRunning,
     state.isPlayerPaused,
     state.playerWindow,
-    state.currentlyPlaying,
     initializePlayer,
     playNextSong,
   ]);
@@ -602,21 +607,27 @@ function Index() {
       if (event.key === "jukeboxStatus" && event.newValue) {
         const status = JSON.parse(event.newValue);
         const currentState = stateRef.current;
-        console.log("[StorageEvent] Parsed status:", status);
-        console.log(
-          "[StorageEvent] Current video ID in state:",
-          currentState.currentVideoId,
-        );
+        // Only log in development to reduce console noise
+        if (process.env.NODE_ENV === 'development') {
+          console.log("[StorageEvent] Parsed status:", status);
+          console.log(
+            "[StorageEvent] Current video ID in state:",
+            currentState.currentVideoId,
+          );
+        }
 
         // Update currently playing based on player window communication - ensure proper sync
         if (status.status === "playing" && status.title && status.videoId) {
           const cleanTitle = status.title.replace(/\([^)]*\)/g, "").trim();
-          console.log(
-            "[StorageEvent] Updating currently playing to:",
-            cleanTitle,
-            "VideoID:",
-            status.videoId,
-          );
+          
+          if (process.env.NODE_ENV === 'development') {
+            console.log(
+              "[StorageEvent] Updating currently playing to:",
+              cleanTitle,
+              "VideoID:",
+              status.videoId,
+            );
+          }
           setState((prev) => ({
             ...prev,
             currentlyPlaying: cleanTitle,
@@ -827,7 +838,7 @@ function Index() {
           } as StorageEvent);
         }
       }
-    }, 250); // Check every 250ms
+    }, 1000); // Check every 1 second instead of 250ms
     
     return () => {
       window.removeEventListener("storage", handleStorageChange);

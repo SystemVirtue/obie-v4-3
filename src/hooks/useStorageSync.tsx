@@ -75,13 +75,20 @@ export const useStorageSync = ({
         try {
           const status = JSON.parse(event.newValue);
           const currentState = stateRef.current;
-          console.log("[StorageSync] Parsed status:", status);
-          console.log("[StorageSync] Current video ID in state:", currentState.currentVideoId);
+          
+          // Only log in development to reduce console noise
+          if (process.env.NODE_ENV === 'development') {
+            console.log("[StorageSync] Parsed status:", status);
+            console.log("[StorageSync] Current video ID in state:", currentState.currentVideoId);
+          }
 
           // Update currently playing when video starts
           if (status.status === "playing" && status.title && status.videoId) {
             const cleanTitle = status.title.replace(/\([^)]*\)/g, "").trim();
-            console.log("[StorageSync] Updating currently playing:", cleanTitle, "VideoID:", status.videoId);
+            
+            if (process.env.NODE_ENV === 'development') {
+              console.log("[StorageSync] Updating currently playing:", cleanTitle, "VideoID:", status.videoId);
+            }
             
             setState((prev) => ({
             ...prev,

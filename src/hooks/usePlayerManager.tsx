@@ -156,6 +156,7 @@ export const usePlayerManager = (
           timestamp: Date.now(),
           testMode: currentState.testMode,
           queueCount: totalQueueSize,
+          videoQuality: currentState.videoQuality,
         };
 
         try {
@@ -285,6 +286,21 @@ export const usePlayerManager = (
         console.log(
           `[InitPlayer] Opening player on ${targetDisplay.name} (${useFullscreen ? "fullscreen" : "windowed"})`,
         );
+        
+        // Check if a player window with the same name already exists
+        const existingWindow = window.open('', 'JukeboxPlayer');
+        if (existingWindow && !existingWindow.closed) {
+          console.log("[InitPlayer] Player window already exists, focusing existing window");
+          existingWindow.focus();
+          // Update state to reference the existing window
+          setState((prev) => ({
+            ...prev,
+            playerWindow: existingWindow,
+            isPlayerRunning: true,
+          }));
+          return;
+        }
+        
         const features = displayManager.generateWindowFeatures(
           targetDisplay,
           useFullscreen,
@@ -315,19 +331,20 @@ export const usePlayerManager = (
           const handlePlayerWindowClose = () => {
             console.log("[InitPlayer] Player window closed by user");
             
-            // Save final window state before closing
-            if (playerWindow && !playerWindow.closed) {
-              displayManager.savePlayerWindowState(playerWindow, currentDisplayId);
-            }
+            // DON'T save window state when user closes the window
+            // Only save state during resize/move events, not on close
+            // displayManager.savePlayerWindowState(playerWindow, currentDisplayId);
             
-            localStorage.setItem(
-              "jukeboxPlayerWindowState",
-              JSON.stringify({
-                isClosed: true,
-                timestamp: Date.now(),
-                closedByUser: true,
-              }),
-            );
+            // DON'T set closed state in localStorage when user closes window
+            // This prevents the closed state from being persisted
+            // localStorage.setItem(
+            //   "jukeboxPlayerWindowState",
+            //   JSON.stringify({
+            //     isClosed: true,
+            //     timestamp: Date.now(),
+            //     closedByUser: true,
+            //   }),
+            // );
           };
           
           // Attach resize listener after window loads

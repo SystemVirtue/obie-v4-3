@@ -227,6 +227,30 @@
               startSeconds: 0
             });
             
+            // Set video quality if specified
+            if (command.videoQuality && command.videoQuality !== 'auto') {
+              // Map our quality names to YouTube quality levels
+              const qualityMap = {
+                'small': 'small',
+                'medium': 'medium', 
+                'large': 'large',
+                'hd720': 'hd720',
+                'hd1080': 'hd1080'
+              };
+              const ytQuality = qualityMap[command.videoQuality];
+              if (ytQuality) {
+                // Set quality after a short delay to ensure video is loaded
+                setTimeout(() => {
+                  try {
+                    player.setPlaybackQuality(ytQuality);
+                    console.log('[Player] Set video quality to:', ytQuality);
+                  } catch (e) {
+                    console.warn('[Player] Could not set video quality:', e);
+                  }
+                }, 1000);
+              }
+            }
+            
             document.getElementById('track-title').textContent = command.title || 'Loading...';
             document.getElementById('now-playing').style.display = 'block';
             
@@ -259,6 +283,29 @@
         case 'volume':
           if (command.volume !== undefined) {
             player.setVolume(command.volume);
+          }
+          break;
+          
+        case 'moveWindow':
+          if (command.x !== undefined && command.y !== undefined) {
+            window.moveTo(command.x, command.y);
+            console.log('[Player] Moved window to:', command.x, command.y);
+            if (command.width && command.height) {
+              window.resizeTo(command.width, command.height);
+              console.log('[Player] Resized window to:', command.width, command.height);
+            }
+          }
+          break;
+          
+        case 'fullscreen':
+          if (command.enable !== false) {
+            document.documentElement.requestFullscreen().catch(e => {
+              console.warn('[Player] Could not enter fullscreen:', e);
+            });
+          } else {
+            document.exitFullscreen().catch(e => {
+              console.warn('[Player] Could not exit fullscreen:', e);
+            });
           }
           break;
           
@@ -326,6 +373,52 @@
         }
       }
     }, 250); // Check every 250ms
+
+    // ========== WINDOW POSITION MANAGEMENT ==========
+    function saveWindowPosition() {
+      try {
+        const position = {
+          x: window.screenX || window.screenLeft,
+          y: window.screenY || window.screenTop,
+          width: window.outerWidth,
+          height: window.outerHeight
+        };
+        localStorage.setItem('PLAYER_WINDOW_POSITION', JSON.stringify(position));
+        console.log('[Player] Saved window position:', position);
+      } catch (e) {
+        console.warn('[Player] Could not save window position:', e);
+      }
+    }
+
+    function loadWindowPosition() {
+      try {
+        const saved = localStorage.getItem('PLAYER_WINDOW_POSITION');
+        if (saved) {
+          const position = JSON.parse(saved);
+          if (position.x !== undefined && position.y !== undefined && 
+              position.width && position.height) {
+            window.moveTo(position.x, position.y);
+            window.resizeTo(position.width, position.height);
+            console.log('[Player] Restored window position:', position);
+          }
+        }
+      } catch (e) {
+        console.warn('[Player] Could not load window position:', e);
+      }
+    }
+
+    // Load position on window load
+    window.addEventListener('load', loadWindowPosition);
+
+    // Save position on resize/move
+    let saveTimeout = null;
+    function debouncedSave() {
+      if (saveTimeout) clearTimeout(saveTimeout);
+      saveTimeout = setTimeout(saveWindowPosition, 500);
+    }
+
+    window.addEventListener('resize', debouncedSave);
+    window.addEventListener('move', debouncedSave);
 
     // ========== PERIODIC STATUS UPDATE ==========
     setInterval(() => {

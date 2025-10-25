@@ -1,5 +1,5 @@
 
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 
 interface BackgroundFile {
   id: string;
@@ -15,7 +15,7 @@ interface BackgroundManagerProps {
   backgroundCycleIndex: number;
   bounceVideos: boolean;
   onBackgroundCycleIndexChange: (index: number) => void;
-  onSelectedBackgroundChange: (id: string) => void;
+  // Remove onSelectedBackgroundChange - cycling shouldn't update user selection
 }
 
 export const useBackgroundManager = ({
@@ -24,8 +24,7 @@ export const useBackgroundManager = ({
   cycleBackgrounds,
   backgroundCycleIndex,
   bounceVideos,
-  onBackgroundCycleIndexChange,
-  onSelectedBackgroundChange
+  onBackgroundCycleIndexChange
 }: BackgroundManagerProps) => {
   const cycleIntervalRef = useRef<NodeJS.Timeout>();
 
@@ -35,9 +34,7 @@ export const useBackgroundManager = ({
       if (validBackgrounds.length > 0) {
         cycleIntervalRef.current = setInterval(() => {
           const nextIndex = (backgroundCycleIndex + 1) % validBackgrounds.length;
-          const nextBackground = validBackgrounds[nextIndex];
           onBackgroundCycleIndexChange(nextIndex);
-          onSelectedBackgroundChange(nextBackground.id);
         }, 25000);
       }
     } else {
@@ -51,9 +48,17 @@ export const useBackgroundManager = ({
         clearInterval(cycleIntervalRef.current);
       }
     };
-  }, [cycleBackgrounds, backgrounds, backgroundCycleIndex]);
+  }, [cycleBackgrounds, backgrounds, backgroundCycleIndex, onBackgroundCycleIndexChange]);
 
   const getCurrentBackground = () => {
+    if (cycleBackgrounds && backgrounds.length > 1) {
+      // When cycling, show the background at the current cycle index
+      const validBackgrounds = backgrounds.filter(bg => bg.id !== 'default');
+      if (validBackgrounds.length > 0 && backgroundCycleIndex < validBackgrounds.length) {
+        return validBackgrounds[backgroundCycleIndex];
+      }
+    }
+    // When not cycling or fallback, show the selected background
     return backgrounds.find(bg => bg.id === selectedBackground) || backgrounds[0];
   };
 
@@ -66,10 +71,31 @@ export const BackgroundDisplay: React.FC<{
   children: React.ReactNode;
 }> = ({ background, bounceVideos, children }) => {
   const backgroundVideoRef = useRef<HTMLVideoElement>(null);
+  const [currentBackground, setCurrentBackground] = useState<BackgroundFile>(background);
+  const [nextBackground, setNextBackground] = useState<BackgroundFile | null>(null);
+  const [isTransitioning, setIsTransitioning] = useState(false);
+
+  // Handle background transitions with fade effect
+  useEffect(() => {
+    if (currentBackground.id !== background.id) {
+      // Start transition to new background
+      setNextBackground(background);
+      setIsTransitioning(true);
+
+      // After fade out completes, switch to new background
+      const timer = setTimeout(() => {
+        setCurrentBackground(background);
+        setNextBackground(null);
+        setIsTransitioning(false);
+      }, 500); // 500ms total transition
+
+      return () => clearTimeout(timer);
+    }
+  }, [background.id, currentBackground.id]);
 
   useEffect(() => {
     const video = backgroundVideoRef.current;
-    if (!video || background.type !== 'video' || !bounceVideos) return;
+    if (!video || currentBackground.type !== 'video' || !bounceVideos) return;
 
     let direction = 1; // 1 for forward, -1 for backward
 
@@ -78,7 +104,7 @@ export const BackgroundDisplay: React.FC<{
         // Reached end, start playing backward
         direction = -1;
         video.pause();
-        
+
         const playBackward = () => {
           if (video.currentTime <= 0.1) {
             // Reached beginning, start playing forward again
@@ -98,30 +124,48 @@ export const BackgroundDisplay: React.FC<{
     return () => {
       video.removeEventListener('timeupdate', handleTimeUpdate);
     };
-  }, [background, bounceVideos]);
+  }, [currentBackground, bounceVideos]);
+
+  const renderBackground = (bg: BackgroundFile, isFadingOut = false) => (
+    <div
+      className={`absolute inset-0 transition-opacity duration-500 ease-in-out ${
+        isFadingOut ? 'opacity-0' : 'opacity-100'
+      }`}
+      style={{
+        backgroundImage: bg.type === 'image' ? `url('${bg.url}')` : 'none',
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat'
+      }}
+    >
+      {bg.type === 'video' && (
+        <video
+          ref={bg === currentBackground ? backgroundVideoRef : undefined}
+          autoPlay
+          loop={!bounceVideos}
+          muted
+          className="absolute inset-0 w-full h-full object-cover"
+          src={bg.url}
+        />
+      )}
+    </div>
+  );
 
   return (
-    <>
-      <div 
-        className="min-h-screen bg-cover bg-center bg-no-repeat relative"
-        style={{ 
-          backgroundImage: background.type === 'image' ? `url('${background.url}')` : 'none',
-          backgroundSize: 'cover'
-        }}
-      >
-        {background.type === 'video' && (
-          <video
-            ref={backgroundVideoRef}
-            autoPlay
-            loop={!bounceVideos}
-            muted
-            className="absolute inset-0 w-full h-full object-cover"
-            src={background.url}
-          />
-        )}
-        <div className="absolute inset-0 bg-black bg-opacity-40" />
+    <div className="min-h-screen relative overflow-hidden">
+      {/* Current background */}
+      {renderBackground(currentBackground, isTransitioning)}
+
+      {/* Next background (during transition) */}
+      {nextBackground && renderBackground(nextBackground)}
+
+      {/* Overlay */}
+      <div className="absolute inset-0 bg-black bg-opacity-40 transition-opacity duration-500 ease-in-out" />
+
+      {/* Content */}
+      <div className="relative z-10">
         {children}
       </div>
-    </>
+    </div>
   );
 };

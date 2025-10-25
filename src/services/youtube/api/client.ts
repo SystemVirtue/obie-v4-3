@@ -123,7 +123,7 @@ export class YouTubeAPIClient {
     const items: PlaylistItem[] = [];
     let pageToken: string | undefined;
 
-    // Fetch all pages (up to 200 items total)
+    // Fetch all pages (up to 2000 items total)
     do {
       const params: Record<string, string> = {
         part: 'snippet',
@@ -148,7 +148,7 @@ export class YouTubeAPIClient {
       })));
 
       pageToken = data.nextPageToken;
-    } while (pageToken && items.length < 200);
+    } while (pageToken && items.length < 2000);
 
     return items;
   }

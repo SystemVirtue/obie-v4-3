@@ -172,6 +172,8 @@ export interface JukeboxConfigState {
   // Player configuration
   maxSongLength: number;
   testMode: boolean;
+  videoQuality: "auto" | "hd1080" | "hd720" | "large" | "medium" | "small";
+  hideEndCards: boolean;
   
   // Coin acceptor configuration
   selectedCoinAcceptor: string;
@@ -184,6 +186,12 @@ export interface JukeboxConfigState {
   cycleBackgrounds: boolean;
   bounceVideos: boolean;
   backgroundCycleIndex: number;
+
+  // Display configuration
+  selectedDisplay: string;
+  useFullscreen: boolean;
+  autoDetectDisplay: boolean;
+  playerWindowPosition: { x: number; y: number; width: number; height: number } | null;
 }
 
 /**
@@ -328,8 +336,14 @@ export interface UserPreferences {
   maxSongLength: number;
   showMiniPlayer: boolean;
   testMode: boolean;
+  videoQuality: "auto" | "hd1080" | "hd720" | "large" | "medium" | "small";
+  hideEndCards: boolean;
   coinValueA: number;
   coinValueB: number;
+  selectedDisplay: string;
+  useFullscreen: boolean;
+  autoDetectDisplay: boolean;
+  playerWindowPosition: { x: number; y: number; width: number; height: number } | null;
 }
 
 

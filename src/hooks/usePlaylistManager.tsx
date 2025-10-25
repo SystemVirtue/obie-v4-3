@@ -52,7 +52,7 @@ export const usePlaylistManager = (
           ...prev,
           defaultPlaylistVideos: parsedData,
           inMemoryPlaylist: parsedData, // Don't spread, use the order from cache directly
-          currentVideoIndex: 0,
+          // Don't reset currentVideoIndex - preserve the saved position
         }));
         
         toast({
@@ -615,40 +615,31 @@ export const usePlaylistManager = (
         return;
       }
 
-      // Play from in-memory playlist - SEQUENTIAL ORDER
+      // Play from in-memory playlist - SEQUENTIAL ORDER with position persistence
       if (state.inMemoryPlaylist.length > 0) {
         console.log('[PlayNext] Playing next song from in-memory playlist (sequential order)');
 
-        // Find the next song that's not the same as the last played
-        let nextVideoIndex = 0;
-        let nextVideo = state.inMemoryPlaylist[0];
+        // Use currentVideoIndex to get the next song
+        const nextVideo = state.inMemoryPlaylist[state.currentVideoIndex];
 
-        // If the next song is the same as the last played, try to find a different one
-        if (state.inMemoryPlaylist.length > 1 && nextVideo.videoId === lastPlayedVideoId.current) {
-          console.warn('[PlayNext] Next song in playlist is the same as last played, finding next available');
-          nextVideoIndex = 1;
-          nextVideo = state.inMemoryPlaylist[1] || state.inMemoryPlaylist[0];
+        if (!nextVideo) {
+          console.warn('[PlayNext] No video at current index, resetting to 0');
+          setState(prev => ({ ...prev, currentVideoIndex: 0 }));
+          isPlayingNext.current = false;
+          return;
         }
 
-        console.log('[PlayNext] Next playlist song:', nextVideo.title, 'VideoID:', nextVideo.videoId);
+        console.log('[PlayNext] Next playlist song:', nextVideo.title, 'VideoID:', nextVideo.videoId, 'Index:', state.currentVideoIndex);
 
-        // Create a new playlist with the played song moved to the end
-        const newPlaylist = [...state.inMemoryPlaylist];
-        const [playedSong] = newPlaylist.splice(nextVideoIndex, 1);
-        newPlaylist.push(playedSong);
+        // Increment currentVideoIndex and wrap around
+        const nextIndex = (state.currentVideoIndex + 1) % state.inMemoryPlaylist.length;
 
-        // Save the rotated playlist to localStorage so player resume works correctly
-        try {
-          localStorage.setItem('active_playlist_data', JSON.stringify(newPlaylist));
-          console.log('[PlayNext] Saved rotated playlist to localStorage');
-        } catch (error) {
-          console.error('[PlayNext] Failed to save playlist to localStorage:', error);
-        }
-
-        setState(prev => ({
-          ...prev,
-          inMemoryPlaylist: newPlaylist
-        }));
+        setState(prev => {
+          return {
+            ...prev,
+            currentVideoIndex: nextIndex
+          };
+        });
 
         lastPlayedVideoId.current = nextVideo.videoId;
         playSong(
@@ -708,6 +699,9 @@ export const usePlaylistManager = (
     // Load the playlist immediately (this will update the queue, not interrupt current song)
     await loadPlaylistVideos(validatedId);
     
+    // Reset current video index to start of new playlist
+    setState((prev) => ({ ...prev, currentVideoIndex: 0 }));
+    
     toast({
       title: "Playlist Changed",
       description: "Queue updated with new playlist",
@@ -734,7 +728,16 @@ export const usePlaylistManager = (
       ? [currentSong, ...shuffledRemaining]
       : shuffledRemaining;
 
-    setState((prev) => ({ ...prev, inMemoryPlaylist: newPlaylist }));
+    setState((prev) => ({ ...prev, inMemoryPlaylist: newPlaylist, currentVideoIndex: 0 }));
+    
+    // Save shuffled playlist to localStorage
+    try {
+      localStorage.setItem('ACTIVE_QUEUE', JSON.stringify(newPlaylist));
+      console.log('[Shuffle] Saved shuffled playlist to ACTIVE_QUEUE localStorage');
+    } catch (error) {
+      console.error('[Shuffle] Failed to save shuffled playlist:', error);
+    }
+    
     addLog(
       "SONG_PLAYED",
       "Playlist shuffled by admin (excluding current song)",
@@ -753,5 +756,6 @@ export const usePlaylistManager = (
     handleDefaultPlaylistChange,
     handlePlaylistReorder,
     handlePlaylistShuffle,
+    shufflePlaylist: handlePlaylistShuffle,
   };
 };

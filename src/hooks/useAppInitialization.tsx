@@ -1,20 +1,27 @@
-/**
- * App Initialization Hook
- * 
- * Handles all startup logic for the jukebox application:
- * - YT_DLP validation
- * - API key testing
- * - Default playlist loading
- * - Initial state setup
- * 
- * @module hooks/useAppInitialization
- */
-
 import { useState, useEffect, useCallback } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { config } from "@/config";
 import { youtubeProxy } from "@/services/youtube/proxy";
 import type { JukeboxFullState, PlaylistItem } from "@/types/jukebox";
+
+// Small helper to add timeouts to promises so we don't hang waiting forever
+function withTimeout<T>(promise: Promise<T>, ms: number, message = "Operation timed out") {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(message));
+    }, ms);
+
+    promise
+      .then((res) => {
+        clearTimeout(timer);
+        resolve(res);
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+  });
+}
 
 interface InitializationStatus {
   isInitialized: boolean;
@@ -57,7 +64,12 @@ export const useAppInitialization = ({
     console.log("[Init] Checking YT_DLP availability...");
     
     try {
-      const isAvailable = await youtubeProxy.isAvailable();
+      // Give the proxy a short timeout so we don't wait forever
+      const isAvailable = await withTimeout(
+        youtubeProxy.isAvailable(),
+        8000,
+        "YT proxy availability check timed out"
+      );
       
       if (isAvailable) {
         console.log("[Init] YT_DLP proxy is working!");
@@ -149,10 +161,15 @@ export const useAppInitialization = ({
       // Try proxy first if available
       if (status.ytdlpAvailable) {
         try {
-          videos = await youtubeProxy.getPlaylist(playlistId);
+          // Allow a bit more time for playlist fetchs but still bound it
+          videos = await withTimeout(
+            youtubeProxy.getPlaylist(playlistId),
+            15000,
+            "YT proxy getPlaylist timed out"
+          );
           console.log(`[Init] Loaded ${videos.length} videos via proxy`);
         } catch (error) {
-          console.warn("[Init] Proxy failed, trying Supabase function...", error);
+          console.warn("[Init] Proxy failed or timed out, trying Supabase function...", error);
         }
       }
       
@@ -160,14 +177,21 @@ export const useAppInitialization = ({
       if (videos.length === 0) {
         const { supabase } = await import("@/integrations/supabase/client");
         const playlistUrl = `https://www.youtube.com/playlist?list=${playlistId}`;
-        
-        const { data, error } = await supabase.functions.invoke("youtube-scraper", {
+
+        // Bound the Supabase function invocation so it doesn't hang the init
+        const invokePromise = supabase.functions.invoke("youtube-scraper", {
           body: {
             action: "playlist",
             url: playlistUrl,
             limit: 48,
           },
         });
+
+        const { data, error } = await withTimeout(
+          invokePromise as Promise<any>,
+          20000,
+          "Supabase function invoke timed out"
+        );
         
         if (error) {
           throw new Error(`Supabase function error: ${error.message}`);
@@ -302,7 +326,16 @@ export const useAppInitialization = ({
   // =========================================================================
 
   useEffect(() => {
-    initialize();
+    // Run initialization but guard it with an overall timeout so a hung
+    // initialize() doesn't leave the app stuck in initializing state.
+    (async () => {
+      try {
+        await withTimeout(initialize(), 30000, "Initialization timed out");
+      } catch (err) {
+        console.error("[Init] Initialization failed or timed out:", err);
+        setStatus((prev) => ({ ...prev, isInitializing: false, error: (err as Error).message }));
+      }
+    })();
   }, []); // Only run once on mount
 
   // =========================================================================

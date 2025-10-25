@@ -10,6 +10,7 @@ import { DisplayConfirmationDialog } from "@/components/DisplayConfirmationDialo
 import { QuotaExhaustedDialog } from "@/components/QuotaExhaustedDialog";
 import { ApiKeyTestDialog } from "@/components/ApiKeyTestDialog";
 import { BackgroundDisplay } from "@/components/BackgroundManager";
+import { useBackgroundManager } from "@/components/BackgroundManager";
 import { JukeboxProvider, useJukebox } from "@/contexts/JukeboxContext";
 import "@/utils/emergencyFallback";
 
@@ -18,45 +19,56 @@ import "@/utils/emergencyFallback";
  * Simplified to use JukeboxProvider context for all state management
  */
 const JukeboxInterface = () => {
-  const { state, ui, background } = useJukebox();
+  const { state, setState } = useJukebox();
 
-  const currentBackground = background.getCurrentBackground();
+  // Use background manager hook
+  const { getCurrentBackground } = useBackgroundManager({
+    backgrounds: state.backgrounds,
+    selectedBackground: state.selectedBackground,
+    cycleBackgrounds: state.cycleBackgrounds,
+    backgroundCycleIndex: state.backgroundCycleIndex,
+    bounceVideos: state.bounceVideos,
+    onBackgroundCycleIndexChange: (index) =>
+      setState((prev) => ({ ...prev, backgroundCycleIndex: index })),
+  });
+
+  const currentBackground = getCurrentBackground();
   const isLoading = state.isLoadingPlaylist || state.isSearching;
 
   return (
     <div className="min-h-screen relative overflow-hidden">
       {/* Background */}
-      <BackgroundDisplay background={currentBackground} />
+      <BackgroundDisplay background={currentBackground} bounceVideos={state.bounceVideos}>
+        {/* Loading Indicator */}
+        {isLoading && <LoadingIndicator />}
 
-      {/* Loading Indicator */}
-      {isLoading && <LoadingIndicator />}
+        {/* Credits Display */}
+        <CreditsDisplay
+          credits={state.credits}
+          mode={state.mode}
+          className="fixed top-4 left-4 z-20"
+        />
 
-      {/* Credits Display */}
-      <CreditsDisplay
-        credits={state.credits}
-        mode={state.mode}
-        className="fixed top-4 left-4 z-20"
-      />
+        {/* Main Content */}
+        <div className="relative z-10 min-h-screen flex items-center justify-center p-8">
+          {/* Search Interface - Conditional based on search method */}
+          {state.searchMethod === "iframe_search" ? (
+            <IframeSearchInterface />
+          ) : (
+            <SearchInterface />
+          )}
+        </div>
 
-      {/* Main Content */}
-      <div className="relative z-10 min-h-screen flex items-center justify-center p-8">
-        {/* Search Interface - Conditional based on search method */}
-        {state.searchMethod === "iframe_search" ? (
-          <IframeSearchInterface />
-        ) : (
-          <SearchInterface />
-        )}
-      </div>
+        {/* Dialogs */}
+        <InsufficientCreditsDialog />
+        <DuplicateSongDialog />
+        <DisplayConfirmationDialog />
+        <QuotaExhaustedDialog />
+        <ApiKeyTestDialog />
 
-      {/* Dialogs */}
-      <InsufficientCreditsDialog />
-      <DuplicateSongDialog />
-      <DisplayConfirmationDialog />
-      <QuotaExhaustedDialog />
-      <ApiKeyTestDialog />
-
-      {/* Admin Console - Only shown when admin mode is active */}
-      {state.showAdmin && <AdminConsole />}
+        {/* Admin Console - Only shown when admin mode is active */}
+        {state.showAdmin && <AdminConsole />}
+      </BackgroundDisplay>
     </div>
   );
 };

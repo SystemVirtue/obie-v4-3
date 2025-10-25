@@ -177,6 +177,16 @@ interface AdminConsoleProps {
   onCoinValueAChange: (value: number) => void;
   coinValueB: number;
   onCoinValueBChange: (value: number) => void;
+  videoQuality: "auto" | "hd1080" | "hd720" | "large" | "medium" | "small";
+  onVideoQualityChange: (quality: "auto" | "hd1080" | "hd720" | "large" | "medium" | "small") => void;
+  hideEndCards: boolean;
+  onHideEndCardsChange: (hide: boolean) => void;
+  selectedDisplay: string;
+  onSelectedDisplayChange: (display: string) => void;
+  useFullscreen: boolean;
+  onUseFullscreenChange: (fullscreen: boolean) => void;
+  autoDetectDisplay: boolean;
+  onAutoDetectDisplayChange: (autoDetect: boolean) => void;
 }
 
 const AVAILABLE_PLAYLISTS: PlaylistInfo[] = [
@@ -246,6 +256,16 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
   onCoinValueAChange,
   coinValueB,
   onCoinValueBChange,
+  videoQuality,
+  onVideoQualityChange,
+  hideEndCards,
+  onHideEndCardsChange,
+  selectedDisplay,
+  onSelectedDisplayChange,
+  useFullscreen,
+  onUseFullscreenChange,
+  autoDetectDisplay,
+  onAutoDetectDisplayChange,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showPlaylistDialog, setShowPlaylistDialog] = useState(false);
@@ -797,6 +817,12 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
               <DisplayControls
                 playerWindow={playerWindow}
                 onInitializePlayer={onInitializePlayer}
+                selectedDisplay={selectedDisplay}
+                onSelectedDisplayChange={onSelectedDisplayChange}
+                useFullscreen={useFullscreen}
+                onUseFullscreenChange={onUseFullscreenChange}
+                autoDetectDisplay={autoDetectDisplay}
+                onAutoDetectDisplayChange={onAutoDetectDisplayChange}
               />
 
               {/* Debug Controls */}
@@ -903,6 +929,51 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
                 <span>6 min</span>
                 <span>15 min</span>
               </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">
+                Video Quality
+              </label>
+              <Select
+                value={videoQuality}
+                onValueChange={onVideoQualityChange}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select video quality" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto">Auto (YouTube Default)</SelectItem>
+                  <SelectItem value="hd1080">1080p HD</SelectItem>
+                  <SelectItem value="hd720">720p HD</SelectItem>
+                  <SelectItem value="large">480p Large</SelectItem>
+                  <SelectItem value="medium">360p Medium</SelectItem>
+                  <SelectItem value="small">240p Small</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-slate-600 mt-1">
+                Set preferred YouTube video quality (may not always be available)
+              </p>
+            </div>
+
+            <div>
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="hideEndCards"
+                  checked={hideEndCards}
+                  onCheckedChange={onHideEndCardsChange}
+                />
+                <label
+                  htmlFor="hideEndCards"
+                  className="text-sm font-medium text-slate-700 cursor-pointer"
+                >
+                  Hide YouTube End Cards
+                </label>
+              </div>
+              <p className="text-xs text-slate-600 mt-1">
+                Note: YouTube end cards cannot be programmatically hidden via iframe API.
+                This setting is for future compatibility.
+              </p>
             </div>
 
             <div>
@@ -1290,6 +1361,69 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
                 <Settings2 className="w-5 h-5 text-primary" />
                 <h3 className="text-lg font-semibold text-slate-900">Settings Management</h3>
               </div>
+              
+              {/* Master Save Button */}
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
+                <Button
+                  onClick={() => {
+                    // Save USER_PREFERENCES
+                    const userPrefs = {
+                      mode,
+                      credits,
+                      defaultPlaylist,
+                      apiKey,
+                      selectedApiKeyOption,
+                      customApiKey,
+                      autoRotateApiKeys,
+                      searchMethod,
+                      selectedCoinAcceptor,
+                      selectedBackground,
+                      cycleBackgrounds,
+                      bounceVideos,
+                      maxSongLength,
+                      showMiniPlayer,
+                      testMode,
+                      videoQuality,
+                      hideEndCards,
+                      coinValueA,
+                      coinValueB,
+                      selectedDisplay,
+                      useFullscreen,
+                      autoDetectDisplay,
+                      playerWindowPosition: null, // Will be saved separately
+                    };
+                    localStorage.setItem('USER_PREFERENCES', JSON.stringify(userPrefs));
+                    
+                    // Save ACTIVE_PLAYLIST (current in-memory playlist)
+                    if (currentPlaylistVideos && currentPlaylistVideos.length > 0) {
+                      localStorage.setItem('ACTIVE_QUEUE', JSON.stringify(currentPlaylistVideos));
+                    }
+                    
+                    // Save CURRENT_QUEUE_INDEX
+                    localStorage.setItem('current_video_index', '0'); // Reset to start on save
+                    
+                    // Save PRIORITY_QUEUE
+                    if (priorityQueue && priorityQueue.length > 0) {
+                      localStorage.setItem('PRIORITY_QUEUE', JSON.stringify(priorityQueue));
+                    }
+                    
+                    // Save ACTIVE_PLAYLIST_DATA (original loaded playlist)
+                    localStorage.setItem('active_playlist_data', JSON.stringify(currentPlaylistVideos));
+                    
+                    console.log('[Master Save] All current configuration saved to localStorage');
+                    alert('Current configuration saved successfully!');
+                  }}
+                  className="bg-green-600 hover:bg-green-700 text-white flex items-center gap-2 w-full"
+                  size="lg"
+                >
+                  <Settings2 className="w-5 h-5" />
+                  SAVE CURRENT CONFIGURATION
+                </Button>
+                <p className="text-xs text-green-700 mt-2">
+                  Master save button - writes all current settings, playlists, and queue state to localStorage.
+                </p>
+              </div>
+              
               <div className="flex gap-2">
                 <Button
                   onClick={() => {
@@ -1506,16 +1640,25 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
 interface DisplayControlsProps {
   playerWindow: Window | null;
   onInitializePlayer: () => void;
+  selectedDisplay: string;
+  onSelectedDisplayChange: (display: string) => void;
+  useFullscreen: boolean;
+  onUseFullscreenChange: (fullscreen: boolean) => void;
+  autoDetectDisplay: boolean;
+  onAutoDetectDisplayChange: (autoDetect: boolean) => void;
 }
 
 const DisplayControls: React.FC<DisplayControlsProps> = ({
   playerWindow,
   onInitializePlayer,
+  selectedDisplay,
+  onSelectedDisplayChange,
+  useFullscreen,
+  onUseFullscreenChange,
+  autoDetectDisplay,
+  onAutoDetectDisplayChange,
 }) => {
   const [availableDisplays, setAvailableDisplays] = useState<DisplayInfo[]>([]);
-  const [selectedDisplay, setSelectedDisplay] = useState<string>("");
-  const [useFullscreen, setUseFullscreen] = useState(true);
-  const [autoDetect, setAutoDetect] = useState(true);
 
   useEffect(() => {
     const loadDisplays = async () => {
@@ -1523,24 +1666,64 @@ const DisplayControls: React.FC<DisplayControlsProps> = ({
       setAvailableDisplays(displays);
 
       // Auto-select secondary display if available and auto-detect is enabled
-      if (autoDetect) {
+      if (autoDetectDisplay) {
         const secondaryDisplay = displays.find((d) => !d.isPrimary);
         if (secondaryDisplay) {
-          setSelectedDisplay(secondaryDisplay.id);
-          setUseFullscreen(true);
+          onSelectedDisplayChange(secondaryDisplay.id);
+          onUseFullscreenChange(true);
         } else {
           const primaryDisplay =
             displays.find((d) => d.isPrimary) || displays[0];
           if (primaryDisplay) {
-            setSelectedDisplay(primaryDisplay.id);
-            setUseFullscreen(false);
+            onSelectedDisplayChange(primaryDisplay.id);
+            onUseFullscreenChange(false);
           }
         }
       }
     };
 
     loadDisplays();
-  }, [autoDetect]);
+  }, [autoDetectDisplay, onSelectedDisplayChange, onUseFullscreenChange]);
+
+  // Move player window when selected display changes
+  useEffect(() => {
+    if (playerWindow && !playerWindow.closed && selectedDisplay) {
+      const display = availableDisplays.find((d) => d.id === selectedDisplay);
+      if (display) {
+        const command = {
+          action: 'moveWindow',
+          x: display.left,
+          y: display.top,
+          width: useFullscreen ? display.width : Math.floor(display.width * 0.8),
+          height: useFullscreen ? display.height : Math.floor(display.height * 0.8),
+          timestamp: Date.now(),
+        };
+        try {
+          playerWindow.localStorage.setItem('jukeboxCommand', JSON.stringify(command));
+          console.log('[DisplayControls] Sent move command to player window:', command);
+        } catch (e) {
+          console.warn('[DisplayControls] Could not send move command:', e);
+        }
+      }
+    }
+  }, [selectedDisplay, playerWindow, availableDisplays, useFullscreen]);
+
+  // Toggle fullscreen when useFullscreen changes
+  useEffect(() => {
+    if (playerWindow && !playerWindow.closed) {
+      const command = {
+        action: 'fullscreen',
+        enable: useFullscreen,
+        timestamp: Date.now(),
+      };
+      try {
+        playerWindow.localStorage.setItem('jukeboxCommand', JSON.stringify(command));
+        console.log('[DisplayControls] Sent fullscreen command:', useFullscreen);
+      } catch (e) {
+        console.warn('[DisplayControls] Could not send fullscreen command:', e);
+      }
+    }
+  }, [useFullscreen, playerWindow]);
 
   const handleOpenPlayerOnDisplay = () => {
     const display = availableDisplays.find((d) => d.id === selectedDisplay);
@@ -1592,8 +1775,8 @@ const DisplayControls: React.FC<DisplayControlsProps> = ({
         {/* Auto-detect toggle */}
         <div className="flex items-center gap-2">
           <Checkbox
-            checked={autoDetect}
-            onCheckedChange={(checked) => setAutoDetect(checked === true)}
+            checked={autoDetectDisplay}
+            onCheckedChange={(checked) => onAutoDetectDisplayChange(checked === true)}
             id="auto-detect-display"
           />
           <label
@@ -1609,7 +1792,7 @@ const DisplayControls: React.FC<DisplayControlsProps> = ({
           <label className="block text-xs font-medium text-blue-700 mb-1">
             Target Display:
           </label>
-          <Select value={selectedDisplay} onValueChange={setSelectedDisplay}>
+          <Select value={selectedDisplay} onValueChange={onSelectedDisplayChange}>
             <SelectTrigger className="w-full">
               <SelectValue placeholder="Select display..." />
             </SelectTrigger>
@@ -1629,7 +1812,7 @@ const DisplayControls: React.FC<DisplayControlsProps> = ({
         <div className="flex items-center gap-2">
           <Checkbox
             checked={useFullscreen}
-            onCheckedChange={(checked) => setUseFullscreen(checked === true)}
+            onCheckedChange={(checked) => onUseFullscreenChange(checked === true)}
             id="use-fullscreen"
           />
           <label htmlFor="use-fullscreen" className="text-sm text-blue-700">

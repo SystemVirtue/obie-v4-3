@@ -35,40 +35,40 @@ const DEFAULT_PLAYLIST_ID = config.youtube.defaultPlaylistId;
 const loadUserPreferences = (): Partial<UserPreferences> => {
   try {
     const saved = localStorage.getItem("USER_PREFERENCES");
-    return saved ? JSON.parse(saved) : {};
+    if (saved) {
+      const prefs = JSON.parse(saved);
+      console.log("[UserPreferences] Loaded from localStorage:", Object.keys(prefs));
+      // Note: Toast would be added here if needed, but since it's in hook, pass toast if required
+      return prefs;
+    }
+    return {};
   } catch (error) {
     console.error("[UserPreferences] Error loading preferences:", error);
     return {};
   }
 };
 
-/**
- * CHANGELOG - 2025-01-XX
- * ADDED: Priority queue persistence to localStorage
- */
-// Load priority queue from localStorage
 const loadPriorityQueue = (): QueuedRequest[] => {
   try {
     const saved = localStorage.getItem("PRIORITY_QUEUE");
-    if (!saved) return [];
-    
-    const parsed = JSON.parse(saved);
-    
-    // Validate queue items
-    if (!Array.isArray(parsed)) {
-      console.warn("[PriorityQueue] Invalid queue data, resetting");
-      return [];
-    }
-    
-    const validQueue = parsed.filter((item: any) => 
-      item.videoId && item.title && item.channelTitle && item.id && item.timestamp
-    );
-    
-    console.log(`[PriorityQueue] Loaded ${validQueue.length} items from localStorage`);
-    return validQueue;
+    return saved ? JSON.parse(saved) : [];
   } catch (error) {
-    console.error("[PriorityQueue] Error loading priority queue:", error);
+    console.error("[UserPreferences] Error loading priority queue:", error);
     return [];
+  }
+};
+
+/**
+ * CHANGELOG - 2025-01-XX
+ * ADDED: Current video index persistence to localStorage
+ */
+const loadCurrentVideoIndex = (): number => {
+  try {
+    const saved = localStorage.getItem("current_video_index");
+    return saved ? parseInt(saved, 10) : 0;
+  } catch (error) {
+    console.error("[UserPreferences] Error loading current video index:", error);
+    return 0;
   }
 };
 
@@ -91,8 +91,14 @@ const saveUserPreferences = (state: JukeboxFullState) => {
       maxSongLength: state.maxSongLength,
       showMiniPlayer: state.showMiniPlayer,
       testMode: state.testMode,
+      videoQuality: state.videoQuality,
+      hideEndCards: state.hideEndCards,
       coinValueA: state.coinValueA,
       coinValueB: state.coinValueB,
+      selectedDisplay: state.selectedDisplay,
+      useFullscreen: state.useFullscreen,
+      autoDetectDisplay: state.autoDetectDisplay,
+      playerWindowPosition: state.playerWindowPosition,
     };
     localStorage.setItem("USER_PREFERENCES", JSON.stringify(preferencesToSave));
     console.log("[UserPreferences] Settings saved to localStorage");
@@ -104,6 +110,7 @@ const saveUserPreferences = (state: JukeboxFullState) => {
 export const useJukeboxState = () => {
   const userPreferences = loadUserPreferences();
   const savedPriorityQueue = loadPriorityQueue();
+  const savedCurrentVideoIndex = loadCurrentVideoIndex();
   
   const [state, setState] = useState<JukeboxFullState>({
     // Mode state
@@ -118,7 +125,7 @@ export const useJukeboxState = () => {
     defaultPlaylist: userPreferences.defaultPlaylist || DEFAULT_PLAYLIST_ID,
     defaultPlaylistVideos: [],
     inMemoryPlaylist: [],
-    currentVideoIndex: 0,
+    currentVideoIndex: savedCurrentVideoIndex,
     
     // UI state
     isSearchOpen: false,
@@ -158,6 +165,8 @@ export const useJukeboxState = () => {
     searchMethod: (userPreferences.searchMethod as SearchMethod) || "scraper",
     maxSongLength: userPreferences.maxSongLength ?? 10,
     testMode: userPreferences.testMode ?? false,
+    videoQuality: (userPreferences.videoQuality as "auto" | "hd1080" | "hd720" | "large" | "medium" | "small") || "auto",
+    hideEndCards: userPreferences.hideEndCards ?? false,
     coinValueA: userPreferences.coinValueA ?? 3,
     coinValueB: userPreferences.coinValueB ?? 1,
     
@@ -204,6 +213,12 @@ export const useJukeboxState = () => {
     cycleBackgrounds: userPreferences.cycleBackgrounds ?? true,
     bounceVideos: userPreferences.bounceVideos ?? false,
     backgroundCycleIndex: 0,
+
+    // Display configuration
+    selectedDisplay: userPreferences.selectedDisplay || "",
+    useFullscreen: userPreferences.useFullscreen ?? true,
+    autoDetectDisplay: userPreferences.autoDetectDisplay ?? true,
+    playerWindowPosition: userPreferences.playerWindowPosition || null,
     
     // History state
     logs: [],
@@ -215,7 +230,7 @@ export const useJukeboxState = () => {
     isAppPaused: false,
   });
 
-  // Save preferences whenever state changes (debounced to avoid excessive writes)
+  // Save preferences whenever relevant state changes (debounced to avoid excessive writes)
   useEffect(() => {
     const timeoutId = setTimeout(() => {
       saveUserPreferences(state);
@@ -223,7 +238,31 @@ export const useJukeboxState = () => {
     }, 500);
     
     return () => clearTimeout(timeoutId);
-  }, [state]);
+  }, [
+    state.mode,
+    state.credits,
+    state.searchMethod,
+    state.selectedCoinAcceptor,
+    state.selectedBackground,
+    state.cycleBackgrounds,
+    state.bounceVideos,
+    state.maxSongLength,
+    state.showMiniPlayer,
+    state.testMode,
+    state.videoQuality,
+    state.hideEndCards,
+    state.coinValueA,
+    state.coinValueB,
+    state.selectedDisplay,
+    state.useFullscreen,
+    state.autoDetectDisplay,
+    state.playerWindowPosition,
+  ]);
+
+  // Save current video index whenever it changes
+  useEffect(() => {
+    localStorage.setItem("current_video_index", JSON.stringify(state.currentVideoIndex));
+  }, [state.currentVideoIndex]);
 
   const addLog = (
     type: LogEntry["type"],

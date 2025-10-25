@@ -45,9 +45,41 @@ import { usePlayerInitialization } from "@/hooks/usePlayerInitialization";
 import type { DisplayInfo } from "@/types/jukebox";
 import { youtubeQuotaService } from "@/services/youtube/api";
 import { shouldTestApiKeys } from "@/utils/apiKeyValidator";
+import { useAppInitialization } from "@/hooks/useAppInitialization";
 
 function Index() {
   const { toast } = useToast();
+
+  // Override localStorage.setItem to show debug toast
+  const originalSetItem = localStorage.setItem;
+  localStorage.setItem = function(key: string, value: string) {
+    const oldValue = localStorage.getItem(key);
+    originalSetItem.call(this, key, value);
+    
+    let changeDetails = "";
+    if (key === "USER_PREFERENCES" && oldValue) {
+      try {
+        const oldPrefs = JSON.parse(oldValue);
+        const newPrefs = JSON.parse(value);
+        const changes = [];
+        for (const prop in newPrefs) {
+          if (oldPrefs[prop] !== newPrefs[prop]) {
+            changes.push(`${prop}: ${oldPrefs[prop]} → ${newPrefs[prop]}`);
+          }
+        }
+        changeDetails = changes.length > 0 ? ` Changes: ${changes.join(", ")}` : " (no changes detected)";
+      } catch (e) {
+        changeDetails = " (JSON parse error)";
+      }
+    }
+    
+    toast({
+      title: "LocalStorage Updated",
+      description: `Updated: ${key}${changeDetails}`,
+      duration: 2000,
+    });
+  };
+
   const {
     state,
     setState,
@@ -60,54 +92,8 @@ function Index() {
     getCurrentPlaylistForDisplay,
   } = useJukeboxState();
 
-  // Check if API key testing is needed on mount - BUT TEST YT_DLP FIRST
-  const [hasCheckedYtdlp, setHasCheckedYtdlp] = useState(false);
-  
-  useEffect(() => {
-    // Prevent re-running if already checked
-    if (hasCheckedYtdlp) {
-      console.log("[Init] YT_DLP already checked, skipping");
-      return;
-    }
-
-    const checkApiKeyValidity = async () => {
-      console.log("[Init] Testing YT_DLP before API key check...");
-      setHasCheckedYtdlp(true);
-      
-      // First, test if youtube-scraper (YT_DLP) is working
-      const ytdlpTest = await import("@/services/youtube/scraper/ytdlp").then(m =>
-        m.validateYtdlp()
-      );
-      
-      if (ytdlpTest.isWorking) {
-        console.log("[Init] YT_DLP is working! Bypassing API key check.");
-        
-        // Show success toast for 2 seconds
-        toast({
-          title: "Keyless_IO_OK",
-          description: "YouTube scraper is operational - no API keys needed",
-          variant: "default",
-          duration: 2000,
-        });
-        
-        // Set search method to scraper
-        setState((prev) => ({
-          ...prev,
-          searchMethod: "scraper" as const,
-        }));
-        
-        // Check if we need to load initial playlist
-        const storedPlaylist = localStorage.getItem("active_playlist");
-        const storedQueue = localStorage.getItem("queue");
-        
-        if (!storedPlaylist && !storedQueue) {
-          console.log("[Init] No playlist in localStorage, loading default playlist via YT_DLP...");
-          // ...existing code for loading playlist...
-        }
-      }
-    };
-    checkApiKeyValidity();
-  }, [hasCheckedYtdlp, setState]);
+  // App initialization checks (moved to hook)
+  useAppInitialization({ state, setState, addLog });
 
   const displayConfirmation = useDisplayConfirmation();
 
@@ -1320,6 +1306,26 @@ function Index() {
         coinValueB={state.coinValueB}
         onCoinValueBChange={(value) =>
           setState((prev) => ({ ...prev, coinValueB: value }))
+        }
+        videoQuality={state.videoQuality}
+        onVideoQualityChange={(quality) =>
+          setState((prev) => ({ ...prev, videoQuality: quality }))
+        }
+        hideEndCards={state.hideEndCards}
+        onHideEndCardsChange={(hide) =>
+          setState((prev) => ({ ...prev, hideEndCards: hide }))
+        }
+        selectedDisplay={state.selectedDisplay}
+        onSelectedDisplayChange={(display) =>
+          setState((prev) => ({ ...prev, selectedDisplay: display }))
+        }
+        useFullscreen={state.useFullscreen}
+        onUseFullscreenChange={(fullscreen) =>
+          setState((prev) => ({ ...prev, useFullscreen: fullscreen }))
+        }
+        autoDetectDisplay={state.autoDetectDisplay}
+        onAutoDetectDisplayChange={(autoDetect) =>
+          setState((prev) => ({ ...prev, autoDetectDisplay: autoDetect }))
         }
       />
 

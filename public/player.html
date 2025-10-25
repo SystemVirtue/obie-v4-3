@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Jukebox Player</title>
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#000000">
+  <script src="https://www.youtube.com/iframe_api"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+    
+    #player-container {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    #player {
+      width: 100%;
+      height: 100%;
+    }
+    
+    #now-playing {
+      display: none !important;
+    }
+    
+    .status {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      padding: 12px 20px;
+      background: rgba(0,0,0,0.3);
+      border-radius: 20px;
+      font-size: 0.9rem;
+      backdrop-filter: blur(10px);
+    }
+    
+    .status.connected::before {
+      content: '●';
+      color: #4ade80;
+      margin-right: 8px;
+      animation: blink 2s infinite;
+    }
+    
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+  </style>
+</head>
+<body>
+  <div class="status connected" id="status">Ready</div>
+  
+  <div id="player-container">
+    <div id="player"></div>
+    <div id="now-playing" style="display:none">
+      <h2 id="track-title">Loading...</h2>
+      <div id="queue-info">Queue: <span id="queue-count">0</span> songs</div>
+    </div>
+  </div>
+
+  <script>
+    console.log('[Player] Initializing...');
+    
+    // ========== VARIABLE DECLARATIONS ==========
+    let player = null;
+    let currentVideoId = '';
+    let isPlaying = false;
+    let testMode = false;
+    let testModeTimeout = null;
+    
+    // ========== YOUTUBE API CALLBACK ==========
+    window.onYouTubeIframeAPIReady = function() {
+      console.log('[YouTube] IFrame API Ready');
+      initializePlayer();
+    };
+
+    function initializePlayer() {
+      console.log('[Player] Creating YouTube player');
+      player = new YT.Player('player', {
+        height: '100%',
+        width: '100%',
+        videoId: '',
+        playerVars: {
+          autoplay: 1,
+          controls: 1,
+          modestbranding: 1,
+          rel: 0,
+          fs: 1,
+          iv_load_policy: 3
+        },
+        events: {
+          onReady: onPlayerReady,
+          onStateChange: onPlayerStateChange,
+          onError: onPlayerError
+        }
+      });
+    }
+
+    function onPlayerReady(event) {
+      console.log('[Player] Ready');
+      sendStatus('ready', 'Player initialized');
+      
+      // Check if there's a pending command
+      checkForCommands();
+    }
+
+    function onPlayerStateChange(event) {
+      console.log('[Player] State changed:', event.data);
+      
+      const stateMap = {
+        '-1': 'unstarted',
+        '0': 'ended',
+        '1': 'playing',
+        '2': 'paused',
+        '3': 'buffering',
+        '5': 'cued'
+      };
+      
+      const state = stateMap[event.data] || 'unknown';
+      
+      if (event.data === YT.PlayerState.PLAYING) {
+        isPlaying = true;
+        const videoData = player.getVideoData();
+        sendStatus('playing', videoData.title, currentVideoId);
+        document.getElementById('now-playing').style.display = 'block';
+        document.getElementById('track-title').textContent = videoData.title || 'Now Playing';
+      } else if (event.data === YT.PlayerState.PAUSED) {
+        isPlaying = false;
+        sendStatus('paused', 'Paused');
+      } else if (event.data === YT.PlayerState.ENDED) {
+        isPlaying = false;
+        
+        // Check if in test mode
+        if (testMode) {
+          console.log('[Player] Test mode complete');
+          sendStatus('testModeComplete', 'Test mode complete', currentVideoId);
+        } else {
+          sendStatus('ended', 'Video ended', currentVideoId);
+        }
+        
+        currentVideoId = '';
+      } else if (event.data === YT.PlayerState.BUFFERING) {
+        sendStatus('buffering', 'Buffering...');
+      }
+    }
+
+    function onPlayerError(event) {
+      console.error('[Player] Error:', event.data);
+      const errorMessages = {
+        2: 'Invalid video ID',
+        5: 'HTML5 player error',
+        100: 'Video not found',
+        101: 'Video not allowed',
+        150: 'Video not allowed'
+      };
+      
+      const message = errorMessages[event.data] || 'Unknown error';
+      sendStatus('error', message, currentVideoId);
+      
+      // Auto-skip on error
+      currentVideoId = '';
+    }
+
+    function sendStatus(status, title = '', videoId = '') {
+      const statusData = {
+        status,
+        title,
+        videoId: videoId || currentVideoId,
+        id: videoId || currentVideoId,
+        timestamp: Date.now()
+      };
+      
+      console.log('[Player] Sending status:', statusData);
+      localStorage.setItem('jukeboxStatus', JSON.stringify(statusData));
+    }
+
+    function checkForCommands() {
+      const commandStr = localStorage.getItem('jukeboxCommand');
+      if (commandStr) {
+        try {
+          const command = JSON.parse(commandStr);
+          processCommand(command);
+        } catch (e) {
+          console.error('[Player] Error parsing command:', e);
+        }
+      }
+    }
+
+    function processCommand(command) {
+      console.log('[Player] Processing command:', command);
+      
+      if (!player) {
+        console.warn('[Player] Player not ready yet');
+        return;
+      }
+      
+      switch (command.action) {
+        case 'play':
+          if (command.videoId && command.videoId !== currentVideoId) {
+            console.log('[Player] Loading video:', command.videoId);
+            currentVideoId = command.videoId;
+            testMode = command.testMode || false;
+            
+            // Clear any existing test mode timeout
+            if (testModeTimeout) {
+              clearTimeout(testModeTimeout);
+              testModeTimeout = null;
+            }
+            
+            player.loadVideoById({
+              videoId: command.videoId,
+              startSeconds: 0
+            });
+            
+            document.getElementById('track-title').textContent = command.title || 'Loading...';
+            document.getElementById('now-playing').style.display = 'block';
+            
+            // Update queue count if provided
+            if (command.queueCount !== undefined) {
+              document.getElementById('queue-count').textContent = command.queueCount;
+            }
+            
+            // If test mode, set timeout to fade out after 20 seconds
+            if (testMode) {
+              console.log('[Player] Test mode enabled - will fade out after 20 seconds');
+              testModeTimeout = setTimeout(() => {
+                console.log('[Player] Test mode timeout - fading out');
+                fadeOutAndComplete();
+              }, 20000);
+            }
+          } else if (!command.videoId) {
+            player.playVideo();
+          }
+          break;
+          
+        case 'pause':
+          player.pauseVideo();
+          break;
+          
+        case 'fadeOut':
+          fadeOutAndComplete();
+          break;
+          
+        case 'volume':
+          if (command.volume !== undefined) {
+            player.setVolume(command.volume);
+          }
+          break;
+          
+        default:
+          console.warn('[Player] Unknown command:', command.action);
+      }
+    }
+
+    function fadeOutAndComplete() {
+      console.log('[Player] Fading out...');
+      
+      // Clear test mode timeout if exists
+      if (testModeTimeout) {
+        clearTimeout(testModeTimeout);
+        testModeTimeout = null;
+      }
+      
+      const startVolume = player.getVolume();
+      const fadeSteps = 20;
+      const fadeInterval = 50; // ms per step
+      let currentStep = 0;
+      
+      const fadeTimer = setInterval(() => {
+        currentStep++;
+        const newVolume = startVolume * (1 - currentStep / fadeSteps);
+        player.setVolume(Math.max(0, newVolume));
+        
+        if (currentStep >= fadeSteps) {
+          clearInterval(fadeTimer);
+          player.pauseVideo();
+          player.setVolume(startVolume); // Restore volume for next song
+          sendStatus('fadeComplete', 'Fade complete', currentVideoId);
+          currentVideoId = '';
+        }
+      }, fadeInterval);
+    }
+
+    // ========== STORAGE EVENT LISTENER & POLLING ==========
+    // Listen for commands from the main window
+    window.addEventListener('storage', (event) => {
+      if (event.key === 'jukeboxCommand' && event.newValue) {
+        try {
+          const command = JSON.parse(event.newValue);
+          processCommand(command);
+        } catch (e) {
+          console.error('[Player] Error parsing storage command:', e);
+        }
+      }
+    });
+    
+    // CRITICAL: Storage events don't fire in same window - add polling
+    let lastCommand = localStorage.getItem('jukeboxCommand');
+    setInterval(() => {
+      const currentCommand = localStorage.getItem('jukeboxCommand');
+      if (currentCommand !== lastCommand) {
+        lastCommand = currentCommand;
+        if (currentCommand) {
+          try {
+            const command = JSON.parse(currentCommand);
+            console.log('[Player] Polling detected new command:', command);
+            processCommand(command);
+          } catch (e) {
+            console.error('[Player] Error parsing polled command:', e);
+          }
+        }
+      }
+    }, 250); // Check every 250ms
+
+    // ========== PERIODIC STATUS UPDATE ==========
+    setInterval(() => {
+      if (player && isPlaying) {
+        try {
+          const currentTime = player.getCurrentTime();
+          const duration = player.getDuration();
+          const videoData = player.getVideoData();
+          
+          // Send periodic update
+          sendStatus('playing', videoData.title, currentVideoId);
+        } catch (e) {
+          // Ignore errors during periodic updates
+        }
+      }
+    }, 5000);
+
+    // ========== INITIAL STATUS ==========
+    console.log('[Player] Ready and waiting for YouTube API');
+  </script>
+</body>
+</html>

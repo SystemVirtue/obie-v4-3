@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Jukebox Admin</title>
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#000000">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      color: white;
+      padding: 20px;
+    }
+    
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+    }
+    
+    h1 {
+      text-align: center;
+      margin-bottom: 2rem;
+      font-size: 2rem;
+      text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+    }
+    
+    .card {
+      background: rgba(255,255,255,0.1);
+      backdrop-filter: blur(10px);
+      border-radius: 16px;
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+    }
+    
+    .card h2 {
+      font-size: 1.2rem;
+      margin-bottom: 1rem;
+      opacity: 0.9;
+    }
+    
+    .controls {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+      margin-bottom: 1rem;
+    }
+    
+    button {
+      padding: 16px;
+      border: none;
+      border-radius: 12px;
+      background: rgba(255,255,255,0.2);
+      color: white;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      backdrop-filter: blur(5px);
+    }
+    
+    button:active {
+      transform: scale(0.95);
+    }
+    
+    button:hover {
+      background: rgba(255,255,255,0.3);
+    }
+    
+    button.primary {
+      background: rgba(74, 222, 128, 0.3);
+      grid-column: span 2;
+    }
+    
+    button.danger {
+      background: rgba(239, 68, 68, 0.3);
+    }
+    
+    input[type="text"],
+    input[type="url"] {
+      width: 100%;
+      padding: 12px;
+      border: 2px solid rgba(255,255,255,0.2);
+      border-radius: 8px;
+      background: rgba(255,255,255,0.1);
+      color: white;
+      font-size: 1rem;
+      margin-bottom: 10px;
+    }
+    
+    input::placeholder {
+      color: rgba(255,255,255,0.5);
+    }
+    
+    input[type="range"] {
+      width: 100%;
+      margin: 10px 0;
+    }
+    
+    .status {
+      text-align: center;
+      padding: 12px;
+      border-radius: 8px;
+      background: rgba(0,0,0,0.2);
+      margin-bottom: 20px;
+      font-weight: 600;
+    }
+    
+    .status.connected {
+      background: rgba(74, 222, 128, 0.2);
+    }
+    
+    .status.disconnected {
+      background: rgba(239, 68, 68, 0.2);
+    }
+    
+    #queue-list {
+      list-style: none;
+      margin-top: 1rem;
+    }
+    
+    #queue-list li {
+      padding: 12px;
+      background: rgba(0,0,0,0.2);
+      border-radius: 8px;
+      margin-bottom: 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    #queue-list button {
+      padding: 8px 12px;
+      font-size: 0.9rem;
+      background: rgba(239, 68, 68, 0.3);
+    }
+    
+    .now-playing {
+      background: rgba(74, 222, 128, 0.2);
+      border: 2px solid rgba(74, 222, 128, 0.4);
+    }
+    
+    .volume-control {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    
+    .volume-control span {
+      min-width: 40px;
+      text-align: center;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🎵 Jukebox Control</h1>
+    
+    <div class="status disconnected" id="status">Connecting...</div>
+    
+    <div class="card" id="approval-card" style="display:none">
+      <h2>🔐 Device Approval</h2>
+      <input type="text" id="code" placeholder="Enter code from player screen">
+      <button class="primary" onclick="approveDevice()">Approve Device</button>
+    </div>
+    
+    <div class="card">
+      <h2>🎮 Playback Controls</h2>
+      <div class="controls">
+        <button onclick="send('play')">▶️ Play</button>
+        <button onclick="send('pause')">⏸️ Pause</button>
+        <button onclick="send('next')">⏭️ Next</button>
+        <button class="danger" onclick="send('clear_queue')">🗑️ Clear Queue</button>
+      </div>
+      
+      <div class="volume-control">
+        <span>🔊</span>
+        <input type="range" min="0" max="100" value="50" id="volume" onchange="send('volume', this.value)">
+        <span id="volume-value">50</span>
+      </div>
+    </div>
+    
+    <div class="card">
+      <h2>➕ Add Song</h2>
+      <input type="url" id="url" placeholder="YouTube URL (e.g., https://youtube.com/watch?v=...)">
+      <button class="primary" onclick="addSong()">Add to Queue</button>
+    </div>
+    
+    <div class="card">
+      <h2>📋 Queue (<span id="queue-count">0</span> songs)</h2>
+      <ul id="queue-list"></ul>
+    </div>
+    
+    <div class="card">
+      <h2>ℹ️ Now Playing</h2>
+      <div id="now-playing">No track playing</div>
+    </div>
+  </div>
+  </div>
+
+  <script>
+    // PWA Service Worker
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js');
+      });
+    }
+
+    let ws;
+    let playerWindow = null;
+
+    // Authentication disabled - show main app directly
+    function showMainApp() {
+      const mainHTML = document.getElementById('main-app-content');
+      if (mainHTML) mainHTML.style.display = 'block';
+      connectWebSocket();
+    }
+
+    // Multi-monitor player window
+    async function openPlayerWindow() {
+      const url = window.location.origin + '/player.html';
+      
+      // Check for multi-screen support
+      if ('getScreenDetails' in window) {
+        try {
+          const screens = await window.getScreenDetails();
+          console.log('Available screens:', screens.screens.length);
+          
+          // Find external monitor (not primary)
+          const externalScreen = screens.screens.find(s => !s.isPrimary) || screens.screens[0];
+          
+          const width = Math.floor(externalScreen.availWidth * 0.9);
+          const height = Math.floor(externalScreen.availHeight * 0.9);
+          const left = externalScreen.availLeft + Math.floor((externalScreen.availWidth - width) / 2);
+          const top = externalScreen.availTop + Math.floor((externalScreen.availHeight - height) / 2);
+          
+          playerWindow = window.open(
+            url,
+            'jukebox-player',
+            `width=${width},height=${height},left=${left},top=${top},popup=yes`
+          );
+          
+          setTimeout(() => {
+            if (playerWindow && !playerWindow.closed) {
+              playerWindow.focus();
+            }
+          }, 500);
+          
+        } catch (e) {
+          console.error('Screen API error:', e);
+          playerWindow = window.open(url, 'jukebox-player', 'width=1280,height=720,popup=yes');
+        }
+      } else {
+        playerWindow = window.open(url, 'jukebox-player', 'width=1280,height=720,popup=yes');
+      }
+    }
+
+    function connectWebSocket() {
+      ws = new WebSocket(`ws://${location.hostname}:${location.port}?type=admin`);
+      
+      ws.onopen = () => {
+        document.getElementById('status').textContent = '✓ Connected';
+        document.getElementById('status').className = 'status connected';
+        document.getElementById('approval-card').style.display = 'block';
+      };
+      
+      ws.onerror = () => {
+        document.getElementById('status').textContent = '✗ Connection Error';
+        document.getElementById('status').className = 'status disconnected';
+      };
+      
+      ws.onclose = () => {
+        document.getElementById('status').textContent = '✗ Disconnected';
+        document.getElementById('status').className = 'status disconnected';
+      };
+      
+      ws.onmessage = (e) => {
+        const msg = JSON.parse(e.data);
+        
+        if (msg.type === 'queue_update') {
+          const list = document.getElementById('queue-list');
+          list.innerHTML = '';
+          
+          if (!msg.queue || msg.queue.length === 0) {
+            list.innerHTML = '<li style="text-align:center; opacity:0.5;">Queue is empty</li>';
+          } else {
+            msg.queue.forEach((song, i) => {
+              const li = document.createElement('li');
+              li.innerHTML = `
+                <span>${i + 1}. ${song.title}</span>
+                <button onclick="removeSong(${i})">×</button>
+              `;
+              list.appendChild(li);
+            });
+          }
+          
+          document.getElementById('queue-count').textContent = msg.queue?.length || 0;
+        }
+        
+        if (msg.type === 'state_update') {
+          const np = document.getElementById('now-playing');
+          np.textContent = `${msg.state || 'Unknown'} - ${Math.floor(msg.currentTime || 0)}s / ${Math.floor(msg.duration || 0)}s`;
+        }
+      };
+    }
+    
+    function send(action, value) {
+      if (action === 'volume') {
+        document.getElementById('volume-value').textContent = value;
+      }
+      
+      ws.send(JSON.stringify({ 
+        type: 'control', 
+        action, 
+        value 
+      }));
+    }
+    
+    function addSong() {
+      const url = document.getElementById('url').value;
+      if (!url) return;
+      
+      const videoId = extractVideoId(url);
+      if (!videoId) {
+        alert('Invalid YouTube URL');
+        return;
+      }
+      
+      ws.send(JSON.stringify({ 
+        type: 'queue_add', 
+        videoId, 
+        title: `Video ${videoId}` 
+      }));
+      
+      document.getElementById('url').value = '';
+    }
+    
+    function removeSong(index) {
+      ws.send(JSON.stringify({ 
+        type: 'queue_remove', 
+        index 
+      }));
+    }
+    
+    function approveDevice() {
+      const code = document.getElementById('code').value.trim().toUpperCase();
+      if (!code) return;
+      
+      ws.send(JSON.stringify({ 
+        type: 'device_approve', 
+        code 
+      }));
+      
+      document.getElementById('code').value = '';
+      alert('Device approval sent!');
+    }
+    
+    function extractVideoId(url) {
+      const patterns = [
+        /(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&\n?#]+)/,
+        /^([a-zA-Z0-9_-]{11})$/
+      ];
+      
+      for (const pattern of patterns) {
+        const match = url.match(pattern);
+        if (match) return match[1];
+      }
+      
+      return null;
+    }
+
+    // Initialize - authentication disabled
+    showMainApp();
+  </script>
+</body>
+</html>

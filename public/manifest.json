@@ -1,0 +1,19 @@
+{
+  "short_name": "Jukebox",
+  "name": "YouTube Jukebox Player",
+  "description": "Local YouTube jukebox with remote control",
+  "icons": [
+    {
+      "src": "/lovable-uploads/8948bfb8-e172-4535-bd9b-76f9d1c35307.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "/admin.html",
+  "background_color": "#000000",
+  "display": "standalone",
+  "scope": "/",
+  "theme_color": "#000000",
+  "orientation": "any",
+  "categories": ["entertainment", "music"]
+}

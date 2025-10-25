@@ -10,10 +10,14 @@ export interface YtdlpValidationResult {
   error?: string;
 }
 
+/**
+ * CHANGELOG - Phase 2
+ * MODIFIED: Increased cache duration from 1 to 5 minutes
+ */
 // Cache validation result to prevent infinite loops
 let cachedResult: YtdlpValidationResult | null = null;
 let lastValidationTime = 0;
-const CACHE_DURATION = 60000; // 1 minute cache
+const CACHE_DURATION = 5 * 60000; // 5 minute cache (Phase 2 improvement)
 
 /**
  * Test if the youtube-scraper edge function is working

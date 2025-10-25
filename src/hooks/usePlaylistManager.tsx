@@ -35,11 +35,14 @@ export const usePlaylistManager = (
 
     console.log("Loading playlist videos for:", playlistId);
 
+    /**
+     * CHANGELOG - Phase 4
+     * REMOVED: active_playlist_url check (consolidated to USER_PREFERENCES)
+     */
     // Check localStorage for cached playlist
-    const cachedPlaylistUrl = localStorage.getItem('active_playlist_url');
     const cachedPlaylistData = localStorage.getItem('active_playlist_data');
 
-    if (cachedPlaylistUrl === playlistId && cachedPlaylistData) {
+    if (cachedPlaylistData) {
       try {
         const parsedData: PlaylistItem[] = JSON.parse(cachedPlaylistData);
         console.log(`[PlaylistManager] Loading ${parsedData.length} videos from localStorage cache`);
@@ -394,8 +397,7 @@ export const usePlaylistManager = (
             `[LoadPlaylist] HTML parser generated ${fallbackVideos.length} fallback videos`,
           );
 
-          // Save fallback to localStorage
-          localStorage.setItem('active_playlist_url', playlistId);
+          // Save fallback to localStorage (Phase 4: removed active_playlist_url)
           localStorage.setItem('active_playlist_data', JSON.stringify(fallbackVideos));
           console.log(`[PlaylistManager] Saved ${fallbackVideos.length} fallback videos to localStorage`);
 
@@ -449,8 +451,7 @@ export const usePlaylistManager = (
       // Shuffle playlist ONCE after loading
       const shuffled = shuffleArray(allVideos);
       
-      // Save to localStorage
-      localStorage.setItem('active_playlist_url', playlistId);
+      // Save to localStorage (Phase 4: removed active_playlist_url)
       localStorage.setItem('active_playlist_data', JSON.stringify(allVideos));
       console.log(`[PlaylistManager] Saved ${allVideos.length} videos to localStorage`);
       
@@ -488,8 +489,7 @@ export const usePlaylistManager = (
             `[LoadPlaylist] HTML parser generated ${fallbackVideos.length} fallback videos for error case`,
           );
 
-          // Save fallback to localStorage
-          localStorage.setItem('active_playlist_url', playlistId);
+          // Save fallback to localStorage (Phase 4: removed active_playlist_url)
           localStorage.setItem('active_playlist_data', JSON.stringify(fallbackVideos));
           console.log(`[PlaylistManager] Saved ${fallbackVideos.length} fallback videos (error case) to localStorage`);
 

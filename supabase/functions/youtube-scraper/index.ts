@@ -46,13 +46,45 @@ Deno.serve(async (req) => {
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   } catch (error) {
+    /**
+     * CHANGELOG - Phase 2
+     * ADDED: Enhanced error responses with retry information
+     */
     console.error('[YouTube Scraper] Error:', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+    
+    // Determine status code and retry information
+    let statusCode = 500;
+    let retryAfter: number | null = null;
+    
+    if (errorMessage.includes('429') || errorMessage.includes('rate limit')) {
+      statusCode = 429;
+      retryAfter = 300; // 5 minutes
+    } else if (errorMessage.includes('404')) {
+      statusCode = 404;
+    } else if (errorMessage.includes('timeout')) {
+      statusCode = 408;
+      retryAfter = 10;
+    }
+    
+    const responseHeaders: Record<string, string> = { 
+      ...corsHeaders, 
+      'Content-Type': 'application/json' 
+    };
+    
+    if (retryAfter) {
+      responseHeaders['Retry-After'] = retryAfter.toString();
+    }
+    
     return new Response(
-      JSON.stringify({ error: errorMessage }),
+      JSON.stringify({ 
+        error: errorMessage,
+        code: statusCode === 429 ? 'RATE_LIMITED' : statusCode === 404 ? 'NOT_FOUND' : 'SERVER_ERROR',
+        retryAfter
+      }),
       { 
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        status: statusCode,
+        headers: responseHeaders
       }
     );
   }

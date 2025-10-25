@@ -15,9 +15,9 @@ describe('UpcomingQueue', () => {
       render(<UpcomingQueue upcomingTitles={mockUpcomingTitles} />);
 
       expect(screen.getByText('COMING UP:')).toBeInTheDocument();
-      expect(screen.getByText(/1\. Song One - Artist One/)).toBeInTheDocument();
-      expect(screen.getByText(/2\. Song Two - Artist Two/)).toBeInTheDocument();
-      expect(screen.getByText(/3\. Song Three - Artist Three/)).toBeInTheDocument();
+      expect(screen.getByText('Song One - Artist One')).toBeInTheDocument();
+      expect(screen.getByText('Song Two - Artist Two')).toBeInTheDocument();
+      expect(screen.getByText('Song Three - Artist Three')).toBeInTheDocument();
     });
 
     it('renders with empty queue', () => {
@@ -30,24 +30,40 @@ describe('UpcomingQueue', () => {
       render(<UpcomingQueue upcomingTitles={['Only Song']} />);
 
       expect(screen.getByText('COMING UP:')).toBeInTheDocument();
-      expect(screen.getByText(/1\. Only Song/)).toBeInTheDocument();
+      expect(screen.getByText('Only Song')).toBeInTheDocument();
     });
 
-    it('numbers songs correctly', () => {
+    it('renders songs without numbers', () => {
       const titles = Array.from({ length: 5 }, (_, i) => `Song ${i + 1}`);
       render(<UpcomingQueue upcomingTitles={titles} />);
 
-      titles.forEach((title, index) => {
-        expect(screen.getByText(new RegExp(`${index + 1}\\. ${title}`))).toBeInTheDocument();
+      titles.forEach((title) => {
+        expect(screen.getByText(title)).toBeInTheDocument();
       });
+      // Ensure no numbers are present
+      expect(screen.queryByText(/^\d+\./)).not.toBeInTheDocument();
     });
 
-    it('renders with many songs', () => {
-      const manyTitles = Array.from({ length: 20 }, (_, i) => `Song ${i + 1}`);
-      render(<UpcomingQueue upcomingTitles={manyTitles} />);
+    it('renders priority queue songs in white', () => {
+      const priorityTitles = ['PRIORITY:Priority Song 1', 'PRIORITY:Priority Song 2', 'Regular Song 3'];
+      render(<UpcomingQueue upcomingTitles={priorityTitles} />);
 
-      expect(screen.getByText(/1\. Song 1$/)).toBeInTheDocument();
-      expect(screen.getByText(/20\. Song 20/)).toBeInTheDocument();
+      // Priority songs should be in white text
+      const priorityElements = screen.getAllByText(/Priority Song/);
+      priorityElements.forEach(element => {
+        expect(element).toHaveClass('text-white');
+      });
+
+      // Regular songs should be in amber text
+      expect(screen.getByText('Regular Song 3')).toHaveClass('text-amber-200');
+    });
+
+    it('removes PRIORITY: prefix from display', () => {
+      const priorityTitles = ['PRIORITY:Test Priority Song'];
+      render(<UpcomingQueue upcomingTitles={priorityTitles} />);
+
+      expect(screen.getByText('Test Priority Song')).toBeInTheDocument();
+      expect(screen.queryByText('PRIORITY:')).not.toBeInTheDocument();
     });
   });
 
@@ -125,10 +141,10 @@ describe('UpcomingQueue', () => {
       expect(marquee).toBeInTheDocument();
     });
 
-    it('has animate-marquee class', () => {
+    it('has animate-marquee-fast class', () => {
       const { container } = render(<UpcomingQueue upcomingTitles={mockUpcomingTitles} />);
 
-      const marquee = container.querySelector('.animate-marquee');
+      const marquee = container.querySelector('.animate-marquee-fast');
       expect(marquee).toBeInTheDocument();
     });
 
@@ -176,11 +192,9 @@ describe('UpcomingQueue', () => {
 
   describe('Animation Key', () => {
     it('animation element has key attribute', () => {
-      const { container } = render(
-        <UpcomingQueue upcomingTitles={['Song 1']} />
-      );
+      const { container } = render(<UpcomingQueue upcomingTitles={mockUpcomingTitles} />);
 
-      const marquee = container.querySelector('.animate-marquee');
+      const marquee = container.querySelector('.animate-marquee-fast');
       expect(marquee).toBeInTheDocument();
       // Key prop exists in React but may not be visible in DOM
       expect(marquee).toBeTruthy();

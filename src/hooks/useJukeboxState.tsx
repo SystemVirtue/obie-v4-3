@@ -31,14 +31,30 @@ export type JukeboxState = JukeboxFullState;
 const DEFAULT_API_KEY = "";
 const DEFAULT_PLAYLIST_ID = config.youtube.defaultPlaylistId;
 
-// Load user preferences from localStorage
+// Cache for user preferences to prevent excessive localStorage reads
+let userPreferencesCache: Partial<UserPreferences> | null = null;
+let cacheTimestamp = 0;
+const CACHE_DURATION = 5000; // 5 seconds
+
+// Load user preferences from localStorage with caching
 const loadUserPreferences = (): Partial<UserPreferences> => {
+  const now = Date.now();
+
+  // Return cached preferences if they're still fresh
+  if (userPreferencesCache && (now - cacheTimestamp) < CACHE_DURATION) {
+    return userPreferencesCache;
+  }
+
   try {
     const saved = localStorage.getItem("USER_PREFERENCES");
     if (saved) {
       const prefs = JSON.parse(saved);
-      console.log("[UserPreferences] Loaded from localStorage:", Object.keys(prefs));
-      // Note: Toast would be added here if needed, but since it's in hook, pass toast if required
+      console.log("[UserPreferences] Loaded from localStorage:", Object.keys(prefs).length, "settings");
+
+      // Update cache
+      userPreferencesCache = prefs;
+      cacheTimestamp = now;
+
       return prefs;
     }
     return {};
@@ -340,29 +356,25 @@ export const useJukeboxState = () => {
   const getUpcomingTitles = () => {
     const upcoming = [];
 
-    // Add priority queue songs first
-    for (let i = 0; i < Math.min(3, state.priorityQueue.length); i++) {
-      upcoming.push(`🎵 ${state.priorityQueue[i].title}`);
+    // Add priority queue songs first (will be displayed in white)
+    for (let i = 0; i < state.priorityQueue.length; i++) {
+      upcoming.push(`PRIORITY:${state.priorityQueue[i].title}`);
     }
 
-    // Fill remaining slots with in-memory playlist songs
-    // Skip the first song if it's currently playing to avoid showing it in "coming up"
-    if (upcoming.length < 3 && state.inMemoryPlaylist.length > 0) {
-      const remainingSlots = 3 - upcoming.length;
-      const startIndex =
-        state.currentlyPlaying !== "Loading..." &&
-        state.inMemoryPlaylist.length > 0 &&
-        state.inMemoryPlaylist[0].title === state.currentlyPlaying
-          ? 1
-          : 0;
+    // Fill remaining slots with in-memory playlist songs starting from currentVideoIndex
+    // (showing the actual upcoming songs)
+    if (state.inMemoryPlaylist.length > 0) {
+      const startIndex = state.currentVideoIndex + 0; // Start from current position
+      const remainingSlots = 4 - upcoming.length;
 
       for (
         let i = startIndex;
-        i <
-        Math.min(startIndex + remainingSlots, state.inMemoryPlaylist.length);
+        i < Math.min(startIndex + remainingSlots, state.inMemoryPlaylist.length);
         i++
       ) {
-        upcoming.push(state.inMemoryPlaylist[i].title);
+        if (i >= 0 && i < state.inMemoryPlaylist.length) {
+          upcoming.push(state.inMemoryPlaylist[i].title);
+        }
       }
     }
 

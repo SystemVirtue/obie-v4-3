@@ -11,6 +11,16 @@ const PORT = 4321;
 
 app.use(cors());
 
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'ok', 
+    message: 'YouTube Playlist Proxy is running',
+    timestamp: new Date().toISOString(),
+    port: PORT
+  });
+});
+
 function extractPlaylistId(urlOrId) {
   // Accepts full URL or just the playlist ID
   if (!urlOrId) return null;

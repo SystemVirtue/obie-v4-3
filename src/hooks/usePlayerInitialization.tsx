@@ -11,8 +11,9 @@
  * @module hooks/usePlayerInitialization
  */
 
-import { useEffect, useRef } from "react";
-import type { JukeboxFullState } from "@/types/jukebox";
+import { useRef, useEffect } from "react";
+import { logger } from "@/utils/logger";
+import { JukeboxFullState } from "@/types/jukebox";
 
 export interface UsePlayerInitializationOptions {
   state: JukeboxFullState;
@@ -53,16 +54,19 @@ export const usePlayerInitialization = ({
    * - Current song doesn't show an error
    */
   useEffect(() => {
-    console.log("[PlayerInit] Checking autoplay conditions:", {
-      inMemoryLength: state.inMemoryPlaylist.length,
-      priorityQueueLength: state.priorityQueue.length,
-      isPlayerRunning: state.isPlayerRunning,
-      isPlayerPaused: state.isPlayerPaused,
-      hasPlayerWindow: !!state.playerWindow,
-      windowClosed: state.playerWindow?.closed,
-      currentlyPlaying: state.currentlyPlaying,
-      hasStarted: hasStartedFirstSongRef.current,
-    });
+    // Only log detailed conditions when debugging or when something significant changes
+    const shouldLog = process.env.NODE_ENV === 'development' &&
+      (state.inMemoryPlaylist.length > 0 || state.priorityQueue.length > 0);
+
+    if (shouldLog) {
+      logger.debug("Checking autoplay conditions:", {
+        inMemoryLength: state.inMemoryPlaylist.length,
+        priorityQueueLength: state.priorityQueue.length,
+        isPlayerRunning: state.isPlayerRunning,
+        currentlyPlaying: state.currentlyPlaying,
+        hasStarted: hasStartedFirstSongRef.current,
+      });
+    }
 
     // Check if conditions are met for autoplay
     if (
@@ -79,7 +83,7 @@ export const usePlayerInitialization = ({
 
       if (shouldAutoStart) {
         hasStartedFirstSongRef.current = true;
-        
+
         console.log("[PlayerInit] Auto-starting first song from playlist...");
         console.log("[PlayerInit] Current playlist state:", {
           inMemoryLength: state.inMemoryPlaylist.length,
@@ -95,7 +99,7 @@ export const usePlayerInitialization = ({
 
         if (needsPlayerInit) {
           console.log("[PlayerInit] Player window closed/not running, initializing...");
-          
+
           initializePlayer()
             .then(() => {
               // After player initializes, start the song with a brief delay

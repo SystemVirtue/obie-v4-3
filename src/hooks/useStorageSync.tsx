@@ -72,17 +72,18 @@ export const useStorageSync = ({
     (event: StorageEvent) => {
       // Handle jukeboxStatus events (player status updates)
       if (event.key === "jukeboxStatus" && event.newValue) {
-        const status = JSON.parse(event.newValue);
-        const currentState = stateRef.current;
-        console.log("[StorageSync] Parsed status:", status);
-        console.log("[StorageSync] Current video ID in state:", currentState.currentVideoId);
+        try {
+          const status = JSON.parse(event.newValue);
+          const currentState = stateRef.current;
+          console.log("[StorageSync] Parsed status:", status);
+          console.log("[StorageSync] Current video ID in state:", currentState.currentVideoId);
 
-        // Update currently playing when video starts
-        if (status.status === "playing" && status.title && status.videoId) {
-          const cleanTitle = status.title.replace(/\([^)]*\)/g, "").trim();
-          console.log("[StorageSync] Updating currently playing:", cleanTitle, "VideoID:", status.videoId);
-          
-          setState((prev) => ({
+          // Update currently playing when video starts
+          if (status.status === "playing" && status.title && status.videoId) {
+            const cleanTitle = status.title.replace(/\([^)]*\)/g, "").trim();
+            console.log("[StorageSync] Updating currently playing:", cleanTitle, "VideoID:", status.videoId);
+            
+            setState((prev) => ({
             ...prev,
             currentlyPlaying: cleanTitle,
             currentVideoId: status.videoId,
@@ -219,6 +220,9 @@ export const useStorageSync = ({
         // Handle player ready status
         if (status.status === "ready") {
           console.log("[StorageSync] Player window ready");
+        }
+        } catch (error) {
+          console.warn("[StorageSync] Failed to parse jukeboxStatus JSON:", error);
         }
       }
 

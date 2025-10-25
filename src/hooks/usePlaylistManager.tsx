@@ -570,18 +570,6 @@ export const usePlaylistManager = (
         console.log('[PlayNext] Playing next song from priority queue');
         const nextRequest = state.priorityQueue[0];
 
-        // Skip if this is the same as the last played song
-        if (nextRequest.videoId === lastPlayedVideoId.current) {
-          console.warn('[PlayNext] Duplicate song detected in priority queue, skipping to next');
-          setState(prev => ({
-            ...prev,
-            priorityQueue: prev.priorityQueue.slice(1)
-          }));
-          isPlayingNext.current = false;
-          playNextSong(); // Try again with next song
-          return;
-        }
-
         console.log('[PlayNext] Next priority song:', nextRequest.title, 'VideoID:', nextRequest.videoId);
 
         /**

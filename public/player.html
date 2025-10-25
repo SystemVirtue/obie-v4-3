@@ -312,6 +312,9 @@
         default:
           console.warn('[Player] Unknown command:', command.action);
       }
+      
+      // Clear the command after processing to prevent re-processing
+      localStorage.removeItem('jukeboxCommand');
     }
 
     function fadeOutAndComplete() {

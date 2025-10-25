@@ -18,6 +18,7 @@ import { Card, CardContent } from "@/components/ui/card";
 interface UpcomingQueueProps {
   /**
    * Array of song titles to display in the queue.
+   * Priority queue songs are prefixed with "PRIORITY:" and will be displayed in white.
    * Should be pre-formatted and cleaned (e.g., parentheses removed).
    */
   upcomingTitles: string[];
@@ -48,18 +49,23 @@ export const UpcomingQueue = ({ upcomingTitles, testMode = false }: UpcomingQueu
       {/* Coming Up Ticker - Responsive bottom ticker */}
       <div className="absolute bottom-0 left-0 right-0 bg-black/80 text-amber-200 py-1 sm:py-2 overflow-hidden">
         <div
-          className="whitespace-nowrap animate-marquee"
+          className="whitespace-nowrap animate-marquee-fast"
           key={`upcoming-${upcomingTitles.length}-${upcomingTitles[0] || ""}`}
         >
           <span className="text-sm sm:text-lg font-bold">COMING UP: </span>
-          {upcomingTitles.map((title, index) => (
-            <span
-              key={`${index}-${title}`}
-              className="mx-4 sm:mx-8 text-sm sm:text-lg"
-            >
-              {index + 1}. {title}
-            </span>
-          ))}
+          {upcomingTitles.map((title, index) => {
+            const isPriority = title.startsWith('PRIORITY:');
+            const displayTitle = isPriority ? title.replace('PRIORITY:', '') : title;
+            return (
+              <span
+                key={`${index}-${title}`}
+                className={`text-sm sm:text-lg ${isPriority ? 'text-white' : 'text-amber-200'}`}
+                style={{ margin: '0 2rem' }} // Increased spacing between songs
+              >
+                {displayTitle}
+              </span>
+            );
+          })}
         </div>
       </div>
     </>

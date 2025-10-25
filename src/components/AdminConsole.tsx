@@ -862,7 +862,7 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
                             artist: "Debug Artist",
                             timestamp: Date.now(),
                           };
-                          playerWindow.localStorage.setItem(
+                          localStorage.setItem(
                             "jukeboxCommand",
                             JSON.stringify(testCommand),
                           );
@@ -1699,7 +1699,7 @@ const DisplayControls: React.FC<DisplayControlsProps> = ({
           timestamp: Date.now(),
         };
         try {
-          playerWindow.localStorage.setItem('jukeboxCommand', JSON.stringify(command));
+          localStorage.setItem('jukeboxCommand', JSON.stringify(command));
           console.log('[DisplayControls] Sent move command to player window:', command);
         } catch (e) {
           console.warn('[DisplayControls] Could not send move command:', e);
@@ -1717,7 +1717,7 @@ const DisplayControls: React.FC<DisplayControlsProps> = ({
         timestamp: Date.now(),
       };
       try {
-        playerWindow.localStorage.setItem('jukeboxCommand', JSON.stringify(command));
+        localStorage.setItem('jukeboxCommand', JSON.stringify(command));
         console.log('[DisplayControls] Sent fullscreen command:', useFullscreen);
       } catch (e) {
         console.warn('[DisplayControls] Could not send fullscreen command:', e);

@@ -20,6 +20,7 @@ export const usePlayerManager = (
 ) => {
   const { toast } = useToast();
   const isProcessingNextSong = React.useRef(false);
+  const lastPlayedSongRef = React.useRef<{ videoId: string; timestamp: number } | null>(null);
 
   const playSong = (
     videoId: string,
@@ -44,6 +45,18 @@ export const usePlayerManager = (
       });
       return;
     }
+
+    // Prevent duplicate play commands for the same song within a short time window
+    const now = Date.now();
+    if (lastPlayedSongRef.current &&
+        lastPlayedSongRef.current.videoId === videoId &&
+        (now - lastPlayedSongRef.current.timestamp) < 2000) { // 2 second deduplication window
+      console.log(`[PlaySong] Duplicate play command prevented for: ${videoId} - ${title}`);
+      return;
+    }
+
+    // Update last played song reference
+    lastPlayedSongRef.current = { videoId, timestamp: now };
 
     console.log(
       `[PlaySong] Starting: ${videoId} - ${title} by ${artist} (retry: ${retryCount})`,
@@ -160,7 +173,8 @@ export const usePlayerManager = (
         };
 
         try {
-          currentState.playerWindow.localStorage.setItem(
+          // Set command in parent window's localStorage - it will be visible to player window
+          localStorage.setItem(
             "jukeboxCommand",
             JSON.stringify(command),
           );
@@ -218,8 +232,8 @@ export const usePlayerManager = (
     const lastInitAttempt = localStorage.getItem("lastInitAttempt");
     if (lastInitAttempt) {
       const timeSinceLastInit = Date.now() - parseInt(lastInitAttempt);
-      if (timeSinceLastInit < 5000) {
-        // 5 second cooldown
+      if (timeSinceLastInit < 2000) {
+        // 2 second cooldown (reduced from 5 seconds)
         console.log("[InitPlayer] Cooldown active, skipping initialization");
         return;
       }
@@ -254,32 +268,58 @@ export const usePlayerManager = (
     }
 
     try {
-      // Check for available displays and prefer secondary display with timeout
-      console.log("[InitPlayer] Detecting available displays...");
-      const displayPromise = displayManager.getDisplays();
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("Display detection timeout")), 3000),
-      );
+      // Try to detect displays, but fall back gracefully if it fails
+      console.log("[InitPlayer] Attempting to detect available displays...");
+      let displays: DisplayInfo[] = [];
+      let displayDetectionFailed = false;
 
-      const displays = await Promise.race([displayPromise, timeoutPromise]) as DisplayInfo[];
-      console.log("[InitPlayer] Available displays:", displays);
+      try {
+        const displayPromise = displayManager.getDisplays();
+        const timeoutPromise = new Promise<DisplayInfo[]>((_, reject) =>
+          setTimeout(() => reject(new Error("Display detection timeout")), 2000),
+        );
+
+        displays = await Promise.race([displayPromise, timeoutPromise]);
+        console.log("[InitPlayer] Available displays:", displays);
+      } catch (displayError) {
+        console.warn("[InitPlayer] Display detection failed, using fallback:", displayError);
+        displayDetectionFailed = true;
+        // Fallback to primary display only
+        displays = [{
+          id: "primary",
+          name: "Primary Display",
+          width: window.screen.availWidth || window.screen.width,
+          height: window.screen.availHeight || window.screen.height,
+          left: 0,
+          top: 0,
+          isPrimary: true,
+          isInternal: true,
+        }];
+      }
 
       let targetDisplay = null;
       let useFullscreen = false;
 
-      // Prefer secondary display if available
-      const secondaryDisplay = displays.find((display) => !display.isPrimary);
-      if (secondaryDisplay) {
-        console.log(
-          "[InitPlayer] Secondary display found, using it:",
-          secondaryDisplay.name,
-        );
-        targetDisplay = secondaryDisplay;
-        useFullscreen = true; // Default to fullscreen on secondary display
+      if (!displayDetectionFailed) {
+        // Prefer secondary display if available and detection succeeded
+        const secondaryDisplay = displays.find((display) => !display.isPrimary);
+        if (secondaryDisplay) {
+          console.log(
+            "[InitPlayer] Secondary display found, using it:",
+            secondaryDisplay.name,
+          );
+          targetDisplay = secondaryDisplay;
+          useFullscreen = true; // Default to fullscreen on secondary display
+        } else {
+          console.log("[InitPlayer] No secondary display found, using primary");
+          targetDisplay = displays.find((d) => d.isPrimary) || displays[0];
+          useFullscreen = false; // Windowed mode on primary display
+        }
       } else {
-        console.log("[InitPlayer] No secondary display found, using primary");
-        targetDisplay = displays.find((d) => d.isPrimary) || displays[0];
-        useFullscreen = false; // Windowed mode on primary display
+        // Use primary display when detection failed
+        console.log("[InitPlayer] Using primary display (detection failed)");
+        targetDisplay = displays[0];
+        useFullscreen = false; // Windowed mode when detection fails
       }
 
       if (targetDisplay) {
@@ -287,29 +327,33 @@ export const usePlayerManager = (
           `[InitPlayer] Opening player on ${targetDisplay.name} (${useFullscreen ? "fullscreen" : "windowed"})`,
         );
         
-        // Check if a player window with the same name already exists
-        const existingWindow = window.open('', 'JukeboxPlayer');
-        if (existingWindow && !existingWindow.closed) {
-          console.log("[InitPlayer] Player window already exists, focusing existing window");
-          existingWindow.focus();
-          // Update state to reference the existing window
-          setState((prev) => ({
-            ...prev,
-            playerWindow: existingWindow,
-            isPlayerRunning: true,
-          }));
-          return;
+        // Close existing player window if open
+        if (state.playerWindow && !state.playerWindow.closed) {
+          state.playerWindow.close();
         }
         
-        const features = displayManager.generateWindowFeatures(
-          targetDisplay,
-          useFullscreen,
-        );
-        const playerWindow = window.open(
-          "/player.html",
-          "JukeboxPlayer",
-          features,
-        );
+        let playerWindow: Window | null;
+        
+        if (displayDetectionFailed) {
+          // When display detection fails, open with basic features to avoid positioning issues
+          console.log("[InitPlayer] Using basic window features due to display detection failure");
+          playerWindow = window.open(
+            "/player.html",
+            "JukeboxPlayer",
+            "width=800,height=600,scrollbars=no,menubar=no,toolbar=no,location=no,status=no,resizable=yes",
+          );
+        } else {
+          // Use proper display positioning when detection succeeded
+          const features = displayManager.generateWindowFeatures(
+            targetDisplay,
+            useFullscreen,
+          );
+          playerWindow = window.open(
+            "/player.html",
+            "JukeboxPlayer",
+            features,
+          );
+        }
 
         if (playerWindow) {
           console.log("[InitPlayer] Player window opened successfully");
@@ -436,9 +480,11 @@ export const usePlayerManager = (
             });
           }, 3000);
 
-          const displayInfo = secondaryDisplay
-            ? `on ${targetDisplay.name}${useFullscreen ? " (fullscreen)" : ""}`
-            : "on primary display";
+          const displayInfo = displayDetectionFailed
+            ? `on primary display (fallback mode)`
+            : useFullscreen
+            ? `on ${targetDisplay.name} (fullscreen)`
+            : `on ${targetDisplay.name}`;
           addLog(
             "SONG_PLAYED",
             `Player window opened successfully ${displayInfo}`,
@@ -633,7 +679,7 @@ export const usePlayerManager = (
       if (state.playerWindow && !state.playerWindow.closed) {
         const command = { action: "pause", timestamp: Date.now() };
         try {
-          state.playerWindow.localStorage.setItem(
+          localStorage.setItem(
             "jukeboxCommand",
             JSON.stringify(command),
           );
@@ -648,7 +694,7 @@ export const usePlayerManager = (
       if (state.playerWindow && !state.playerWindow.closed) {
         const command = { action: "resume", timestamp: Date.now() };
         try {
-          state.playerWindow.localStorage.setItem(
+          localStorage.setItem(
             "jukeboxCommand",
             JSON.stringify(command),
           );
@@ -709,7 +755,7 @@ export const usePlayerManager = (
           timestamp: Date.now(),
         };
         try {
-          currentState.playerWindow.localStorage.setItem(
+          localStorage.setItem(
             "jukeboxCommand",
             JSON.stringify(command),
           );

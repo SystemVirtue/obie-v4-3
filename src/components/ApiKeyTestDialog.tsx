@@ -9,7 +9,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { CheckCircle, XCircle, Loader2, AlertTriangle } from "lucide-react";
-import { youtubeQuotaService, QuotaUsage } from "@/services/youtubeQuota";
+import { youtubeQuotaService, QuotaUsage } from "@/services/youtube/api";
 
 interface ApiKeyTestResult {
   key: string;

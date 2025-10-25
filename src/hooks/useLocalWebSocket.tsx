@@ -1,5 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useToast } from '@/hooks/use-toast';
+import { config } from '@/config';
+import type { WebSocketJukeboxState, QueuedRequest } from '@/types/jukebox';
 
 export interface JukeboxCommand {
   type: 'control' | 'queue_add' | 'queue_remove' | 'queue_reorder';
@@ -8,16 +10,8 @@ export interface JukeboxCommand {
   payload?: any;
 }
 
-export interface JukeboxState {
-  isPlaying: boolean;
-  currentSong: string;
-  currentVideoId: string;
-  queue: any[];
-  state: string;
-  volume: number;
-  currentTime: number;
-  duration: number;
-}
+// Re-export WebSocketJukeboxState for backward compatibility
+export type JukeboxState = WebSocketJukeboxState;
 
 interface UseLocalWebSocketOptions {
   type: 'player' | 'admin';
@@ -41,7 +35,7 @@ export const useLocalWebSocket = ({
   const reconnectTimeoutRef = useRef<NodeJS.Timeout>();
   const { toast } = useToast();
 
-  const WS_URL = import.meta.env.VITE_WS_URL || `ws://localhost:3001`;
+  const WS_URL = config.websocket.url;
 
   // Load queue from localStorage on mount
   useEffect(() => {

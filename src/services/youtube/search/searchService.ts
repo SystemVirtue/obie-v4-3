@@ -1,25 +1,19 @@
 import { supabase } from "@/integrations/supabase/client";
-import { requestQueue } from './requestQueue';
+import { requestQueue } from '@/services/requestQueue';
+import { SearchResult } from '@/types/jukebox';
 
 /**
  * CHANGELOG - Phase 2
  * ADDED: Enhanced error handling with specific error types
  * ADDED: Improved caching strategy (15 minutes for search results)
  * ADDED: Integration with request queue for better reliability
+ * 
+ * CHANGELOG - Phase 3.1
+ * MODIFIED: Use unified SearchResult type from @/types/jukebox
  */
 
-export interface SearchResult {
-  id: string;
-  title: string;
-  channelTitle: string;
-  thumbnailUrl: string;
-  videoUrl: string;
-  officialScore?: number;
-  duration?: string;
-  durationMinutes?: number;
-}
-
-export type SearchMethod = "scraper" | "iframe_search";
+import type { SearchMethod as JukeboxSearchMethod } from "@/types/jukebox";
+export type SearchMethod = JukeboxSearchMethod;
 
 interface ScraperError {
   code: 'RATE_LIMITED' | 'VIDEO_UNAVAILABLE' | 'NETWORK_ERROR' | 'PARSE_ERROR' | 'TIMEOUT';
@@ -94,6 +88,7 @@ class MusicSearchService {
 
           const mappedResults: SearchResult[] = data.videos.map((video: any) => ({
             id: video.id,
+            videoId: video.id, // Add videoId for unified type
             title: video.title,
             channelTitle: video.channelTitle,
             thumbnailUrl: video.thumbnailUrl,
@@ -178,6 +173,7 @@ class MusicSearchService {
           }
           return data.results.map((video: any) => ({
             id: video.id,
+            videoId: video.id, // Add videoId for unified type
             title: video.title,
             channelTitle: video.channelTitle,
             thumbnailUrl: video.thumbnailUrl,

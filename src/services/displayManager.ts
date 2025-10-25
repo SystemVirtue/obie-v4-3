@@ -1,13 +1,4 @@
-interface DisplayInfo {
-  id: string;
-  name: string;
-  width: number;
-  height: number;
-  left: number;
-  top: number;
-  isPrimary: boolean;
-  isInternal: boolean;
-}
+import type { DisplayInfo } from "../../types/jukebox";
 
 interface DisplayPreference {
   preferExternal: boolean;

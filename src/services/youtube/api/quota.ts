@@ -1,4 +1,4 @@
-import { circuitBreaker } from "./circuitBreaker";
+import { circuitBreaker } from "../../circuitBreaker";
 
 interface QuotaUsage {
   used: number;

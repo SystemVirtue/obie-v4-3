@@ -1,128 +1,38 @@
-import { useState, useEffect } from "react";
-import { SearchMethod } from "@/services/musicSearch";
+import { useState, useEffect, Dispatch, SetStateAction } from "react";
+import { SearchMethod } from "@/services/youtube/search";
+import { config } from "@/config";
+import type {
+  JukeboxFullState,
+  SearchResult,
+  PlaylistItem,
+  QueuedRequest,
+  LogEntry,
+  UserRequest,
+  CreditHistory,
+  BackgroundFile,
+  UserPreferences,
+} from "@/types/jukebox";
 
-export interface SearchResult {
-  id: string;
-  title: string;
-  channelTitle: string;
-  thumbnailUrl: string;
-  videoUrl: string;
-  officialScore?: number;
-  duration?: string;
-  durationMinutes?: number;
-}
+// Re-export types for backward compatibility
+export type {
+  SearchResult,
+  PlaylistItem,
+  QueuedRequest,
+  LogEntry,
+  UserRequest,
+  CreditHistory,
+  BackgroundFile,
+};
 
-export interface PlaylistItem {
-  id: string;
-  title: string;
-  channelTitle: string;
-  videoId: string;
-  isNowPlaying?: boolean;
-  isUserRequest?: boolean;
-}
-
-export interface QueuedRequest {
-  id: string;
-  title: string;
-  channelTitle: string;
-  videoId: string;
-  timestamp: string;
-}
-
-export interface LogEntry {
-  timestamp: string;
-  type: "SONG_PLAYED" | "USER_SELECTION" | "CREDIT_ADDED" | "CREDIT_REMOVED";
-  description: string;
-  videoId?: string;
-  creditAmount?: number;
-}
-
-export interface UserRequest {
-  timestamp: string;
-  title: string;
-  videoId: string;
-  channelTitle: string;
-}
-
-export interface CreditHistory {
-  timestamp: string;
-  amount: number;
-  type: "ADDED" | "REMOVED";
-  description: string;
-}
-
-export interface BackgroundFile {
-  id: string;
-  name: string;
-  url: string;
-  type: "image" | "video";
-}
-
-export interface JukeboxState {
-  mode: "FREEPLAY" | "PAID";
-  credits: number;
-  priorityQueue: QueuedRequest[];
-  defaultPlaylist: string;
-  defaultPlaylistVideos: PlaylistItem[];
-  inMemoryPlaylist: PlaylistItem[];
-  currentVideoIndex: number;
-  isSearchOpen: boolean;
-  isAdminOpen: boolean;
-  searchResults: SearchResult[];
-  searchQuery: string;
-  isSearching: boolean;
-  selectedCoinAcceptor: string;
-  playerWindow: Window | null;
-  apiKey: string;
-  selectedApiKeyOption: string;
-  customApiKey: string;
-  autoRotateApiKeys: boolean;
-  lastRotationTime: string;
-  rotationHistory: Array<{
-    timestamp: string;
-    from: string;
-    to: string;
-    reason: string;
-  }>;
-  searchMethod: SearchMethod;
-  logs: LogEntry[];
-  userRequests: UserRequest[];
-  creditHistory: CreditHistory[];
-  backgrounds: BackgroundFile[];
-  selectedBackground: string;
-  cycleBackgrounds: boolean;
-  bounceVideos: boolean;
-  backgroundCycleIndex: number;
-  showKeyboard: boolean;
-  showSearchResults: boolean;
-  isPlayerRunning: boolean;
-  currentlyPlaying: string;
-  currentVideoId: string;
-  maxSongLength: number;
-  showInsufficientCredits: boolean;
-  showDuplicateSong: boolean;
-  duplicateSongTitle: string;
-  showDisplayConfirmation: boolean;
-  pendingDisplayInfo: any | null;
-  isPlayerPaused: boolean;
-  showSkipConfirmation: boolean;
-  showMiniPlayer: boolean;
-  testMode: boolean;
-  coinValueA: number;
-  coinValueB: number;
-  allKeysExhausted: boolean;
-  isAppPaused: boolean;
-  showApiKeyTestDialog: boolean;
-}
+// Export main state type
+export type JukeboxState = JukeboxFullState;
 
 // Start with empty API key - will be set by API key test dialog
 const DEFAULT_API_KEY = "";
-const DEFAULT_PLAYLIST_ID =
-  import.meta.env.VITE_DEFAULT_PLAYLIST_ID ||
-  "PLN9QqCogPsXJCgeL_iEgYnW6Rl_8nIUUH";
+const DEFAULT_PLAYLIST_ID = config.youtube.defaultPlaylistId;
 
 // Load user preferences from localStorage
-const loadUserPreferences = (): Partial<JukeboxState> => {
+const loadUserPreferences = (): Partial<UserPreferences> => {
   try {
     const saved = localStorage.getItem("USER_PREFERENCES");
     return saved ? JSON.parse(saved) : {};
@@ -163,9 +73,9 @@ const loadPriorityQueue = (): QueuedRequest[] => {
 };
 
 // Save user preferences to localStorage (exclude runtime state)
-const saveUserPreferences = (state: JukeboxState) => {
+const saveUserPreferences = (state: JukeboxFullState) => {
   try {
-    const preferencesToSave = {
+    const preferencesToSave: UserPreferences = {
       mode: state.mode,
       credits: state.credits,
       defaultPlaylist: state.defaultPlaylist,
@@ -185,7 +95,7 @@ const saveUserPreferences = (state: JukeboxState) => {
       coinValueB: state.coinValueB,
     };
     localStorage.setItem("USER_PREFERENCES", JSON.stringify(preferencesToSave));
-    console.log("[UserPreferences] Settings saved to localStorage:", preferencesToSave);
+    console.log("[UserPreferences] Settings saved to localStorage");
   } catch (error) {
     console.error("[UserPreferences] Error saving preferences:", error);
   }
@@ -195,21 +105,50 @@ export const useJukeboxState = () => {
   const userPreferences = loadUserPreferences();
   const savedPriorityQueue = loadPriorityQueue();
   
-  const [state, setState] = useState<JukeboxState>({
+  const [state, setState] = useState<JukeboxFullState>({
+    // Mode state
     mode: (userPreferences.mode as "FREEPLAY" | "PAID") || "PAID",
     credits: userPreferences.credits ?? 0,
+    
+    // Queue state
     priorityQueue: savedPriorityQueue,
+    queue: [], // Add missing queue property
+    
+    // Playlist state
     defaultPlaylist: userPreferences.defaultPlaylist || DEFAULT_PLAYLIST_ID,
     defaultPlaylistVideos: [],
     inMemoryPlaylist: [],
     currentVideoIndex: 0,
+    
+    // UI state
     isSearchOpen: false,
     isAdminOpen: false,
     searchResults: [],
     searchQuery: "",
     isSearching: false,
-    selectedCoinAcceptor: userPreferences.selectedCoinAcceptor || "",
+    showKeyboard: false,
+    showSearchResults: false,
+    showInsufficientCredits: false,
+    showDuplicateSong: false,
+    duplicateSongTitle: "",
+    showDisplayConfirmation: false,
+    pendingDisplayInfo: null,
+    showSkipConfirmation: false,
+    showApiKeyTestDialog: false,
+    showMiniPlayer: userPreferences.showMiniPlayer ?? false,
+    
+    // Player state
+    isPlaying: false, // Add missing property
+    currentSong: "Loading...", // Add missing property
+    currentlyPlaying: "Loading...",
+    currentVideoId: "",
+    volume: config.player.defaultVolume, // Add missing property
+    isPlayerPaused: false,
+    isPlayerRunning: false,
     playerWindow: null,
+    
+    // Config state
+    selectedCoinAcceptor: userPreferences.selectedCoinAcceptor || "",
     apiKey: userPreferences.apiKey || DEFAULT_API_KEY,
     selectedApiKeyOption: userPreferences.selectedApiKeyOption || "key1",
     customApiKey: userPreferences.customApiKey || "",
@@ -217,9 +156,12 @@ export const useJukeboxState = () => {
     lastRotationTime: "",
     rotationHistory: [],
     searchMethod: (userPreferences.searchMethod as SearchMethod) || "scraper",
-    logs: [],
-    userRequests: [],
-    creditHistory: [],
+    maxSongLength: userPreferences.maxSongLength ?? 10,
+    testMode: userPreferences.testMode ?? false,
+    coinValueA: userPreferences.coinValueA ?? 3,
+    coinValueB: userPreferences.coinValueB ?? 1,
+    
+    // Background configuration
     backgrounds: [
       {
         id: "default",
@@ -262,26 +204,15 @@ export const useJukeboxState = () => {
     cycleBackgrounds: userPreferences.cycleBackgrounds ?? true,
     bounceVideos: userPreferences.bounceVideos ?? false,
     backgroundCycleIndex: 0,
-    showKeyboard: false,
-    showSearchResults: false,
-    isPlayerRunning: false,
-    currentlyPlaying: "Loading...",
-    currentVideoId: "",
-    maxSongLength: userPreferences.maxSongLength ?? 10,
-    showInsufficientCredits: false,
-    showDuplicateSong: false,
-    duplicateSongTitle: "",
-    showDisplayConfirmation: false,
-    pendingDisplayInfo: null,
-    isPlayerPaused: false,
-    showSkipConfirmation: false,
-    showMiniPlayer: userPreferences.showMiniPlayer ?? false,
-    testMode: userPreferences.testMode ?? false,
-    coinValueA: userPreferences.coinValueA ?? 3,
-    coinValueB: userPreferences.coinValueB ?? 1,
+    
+    // History state
+    logs: [],
+    userRequests: [],
+    creditHistory: [],
+    
+    // Runtime state
     allKeysExhausted: false,
     isAppPaused: false,
-    showApiKeyTestDialog: false,
   });
 
   // Save preferences whenever state changes (debounced to avoid excessive writes)

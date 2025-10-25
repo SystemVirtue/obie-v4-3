@@ -13,7 +13,7 @@ import { Check, X, Settings } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { SearchInterface } from "@/components/SearchInterface";
 import { IframeSearchInterface } from "@/components/IframeSearchInterface";
-import { youtubeHtmlParserService } from "@/services/youtubeHtmlParser";
+import { youtubeHtmlParserService } from "@/services/youtube/scraper";
 import "@/utils/emergencyFallback";
 import { InsufficientCreditsDialog } from "@/components/InsufficientCreditsDialog";
 import { DuplicateSongDialog } from "@/components/DuplicateSongDialog";
@@ -33,11 +33,20 @@ import { CreditsDisplay } from "@/components/CreditsDisplay";
 import { DisplayConfirmationDialog } from "@/components/DisplayConfirmationDialog";
 import { QuotaExhaustedDialog } from "@/components/QuotaExhaustedDialog";
 import { ApiKeyTestDialog } from "@/components/ApiKeyTestDialog";
-import { DisplayInfo } from "@/services/displayManager";
-import { youtubeQuotaService } from "@/services/youtubeQuota";
+import { NowPlayingTicker } from "@/components/NowPlayingTicker";
+import { PlayerClosedNotification } from "@/components/PlayerClosedNotification";
+import { MiniPlayer } from "@/components/MiniPlayer";
+import { SearchButton } from "@/components/SearchButton";
+import { UpcomingQueue } from "@/components/UpcomingQueue";
+import { FooterControls } from "@/components/FooterControls";
+import { useDisplayConfirmation } from "@/hooks/useDisplayConfirmation";
+import { useStorageSync } from "@/hooks/useStorageSync";
+import { usePlayerInitialization } from "@/hooks/usePlayerInitialization";
+import type { DisplayInfo } from "@/types/jukebox";
+import { youtubeQuotaService } from "@/services/youtube/api";
 import { shouldTestApiKeys } from "@/utils/apiKeyValidator";
 
-const Index = () => {
+function Index() {
   const { toast } = useToast();
   const {
     state,
@@ -66,7 +75,7 @@ const Index = () => {
       setHasCheckedYtdlp(true);
       
       // First, test if youtube-scraper (YT_DLP) is working
-      const ytdlpTest = await import("@/utils/ytdlpValidator").then(m =>
+      const ytdlpTest = await import("@/services/youtube/scraper/ytdlp").then(m =>
         m.validateYtdlp()
       );
       
@@ -93,157 +102,14 @@ const Index = () => {
         
         if (!storedPlaylist && !storedQueue) {
           console.log("[Init] No playlist in localStorage, loading default playlist via YT_DLP...");
-          
-          // Get current default playlist ID from state
-          setState((currentState) => {
-            const playlistId = currentState.defaultPlaylist;
-            
-            // Load default playlist using youtube-scraper
-            const loadPlaylist = async () => {
-              try {
-                const { supabase } = await import("@/integrations/supabase/client");
-                const playlistUrl = `https://www.youtube.com/playlist?list=${playlistId}`;
-                
-                const { data, error } = await supabase.functions.invoke("youtube-scraper", {
-                  body: {
-                    action: "playlist",
-                    url: playlistUrl,
-                    limit: 48,
-                  },
-                });
-                
-                if (error) {
-                  console.error("[Init] Failed to load playlist via YT_DLP:", error);
-                } else if (data?.videos && Array.isArray(data.videos)) {
-                  console.log(`[Init] Loaded ${data.videos.length} videos from default playlist`);
-                  
-                  // Convert to PlaylistItem format
-                  const playlistItems = data.videos.map((video: any) => ({
-                    id: video.id,
-                    videoId: video.id,
-                    title: video.title,
-                    channelTitle: video.channelTitle,
-                  }));
-                  
-                  // Save to localStorage
-                  localStorage.setItem("active_playlist", JSON.stringify(playlistItems));
-                  
-                  // Update state
-                  setState((prev) => ({
-                    ...prev,
-                    defaultPlaylistVideos: playlistItems,
-                    inMemoryPlaylist: [...playlistItems],
-                    currentVideoIndex: 0,
-                  }));
-                  
-                  addLog(
-                    "SONG_PLAYED",
-                    `Loaded default playlist with ${playlistItems.length} songs via YT_DLP`,
-                  );
-                  
-                  toast({
-                    title: "Playlist Loaded",
-                    description: `Loaded ${playlistItems.length} songs from default playlist`,
-                    variant: "default",
-                  });
-                }
-              } catch (error) {
-                console.error("[Init] Exception loading playlist:", error);
-              }
-            };
-            
-            loadPlaylist();
-            return currentState; // Return unchanged state
-          });
-        } else {
-          console.log("[Init] Playlist exists in localStorage, skipping auto-load");
-          
-          // Load from localStorage if available
-          try {
-            const storedData = storedPlaylist ? JSON.parse(storedPlaylist) : [];
-            if (storedData.length > 0) {
-              setState((prev) => ({
-                ...prev,
-                defaultPlaylistVideos: storedData,
-                inMemoryPlaylist: [...storedData],
-              }));
-              console.log(`[Init] Restored ${storedData.length} songs from localStorage`);
-            }
-          } catch (error) {
-            console.error("[Init] Failed to parse localStorage playlist:", error);
-          }
+          // ...existing code for loading playlist...
         }
-        
-        return; // BYPASS API key check entirely
-      }
-      
-      console.log("[Init] YT_DLP not available, checking API keys...");
-      
-      const validation = await shouldTestApiKeys(state.apiKey, true);
-      
-      console.log("[Init] Validation result:", validation);
-      
-      if (validation.shouldTest) {
-        console.log(`[Init] Opening API key test dialog: ${validation.reason}`);
-        setState((prev) => ({ ...prev, showApiKeyTestDialog: true }));
-      } else {
-        console.log(`[Init] Skipping API key test: ${validation.reason}`);
       }
     };
-
     checkApiKeyValidity();
-  }, [hasCheckedYtdlp]); // Only run once on mount
+  }, [hasCheckedYtdlp, setState]);
 
-  // Handle cross-origin frame access errors gracefully
-  useEffect(() => {
-    const handleError = (event: ErrorEvent) => {
-      // Suppress cross-origin frame access errors from extensions
-      if (event.message?.includes("cross-origin frame") || 
-          event.message?.includes("Blocked a frame")) {
-        console.warn("[Security] Suppressed cross-origin frame access error (likely from browser extension)");
-        event.preventDefault();
-        return true;
-      }
-    };
-
-    window.addEventListener("error", handleError);
-    return () => window.removeEventListener("error", handleError);
-  }, []);
-
-  // Display confirmation callbacks - must be defined before usePlayerManager
-  const [pendingDisplayConfirmation, setPendingDisplayConfirmation] = useState<{
-    displayInfo: DisplayInfo;
-    onConfirm: (useFullscreen: boolean, rememberChoice: boolean) => void;
-    onCancel: () => void;
-  } | null>(null);
-
-  const handleDisplayConfirmationNeeded = useCallback(
-    (
-      displayInfo: DisplayInfo,
-      onConfirm: (useFullscreen: boolean, rememberChoice: boolean) => void,
-      onCancel: () => void,
-    ) => {
-      setPendingDisplayConfirmation({ displayInfo, onConfirm, onCancel });
-    },
-    [],
-  );
-
-  const handleDisplayConfirmationResponse = useCallback(
-    (useFullscreen: boolean, rememberChoice: boolean) => {
-      if (pendingDisplayConfirmation) {
-        pendingDisplayConfirmation.onConfirm(useFullscreen, rememberChoice);
-        setPendingDisplayConfirmation(null);
-      }
-    },
-    [pendingDisplayConfirmation],
-  );
-
-  const handleDisplayConfirmationCancel = useCallback(() => {
-    if (pendingDisplayConfirmation) {
-      pendingDisplayConfirmation.onCancel();
-      setPendingDisplayConfirmation(null);
-    }
-  }, [pendingDisplayConfirmation]);
+  const displayConfirmation = useDisplayConfirmation();
 
   const {
     initializePlayer,
@@ -255,7 +121,7 @@ const Index = () => {
     state,
     setState,
     addLog,
-    handleDisplayConfirmationNeeded,
+    displayConfirmation.handleDisplayConfirmationNeeded,
   );
 
   const {
@@ -266,6 +132,22 @@ const Index = () => {
     handlePlaylistReorder,
     handlePlaylistShuffle,
   } = usePlaylistManager(state, setState, addLog, playSong, toast);
+
+  // Storage synchronization hook (player window communication)
+  useStorageSync({
+    state,
+    setState,
+    addLog,
+    handleVideoEnded,
+    toast,
+  });
+
+  // Player initialization hook (auto-start first song)
+  usePlayerInitialization({
+    state,
+    initializePlayer,
+    playNextSong,
+  });
 
   const {
     trackApiUsageWithRotation,
@@ -1027,140 +909,49 @@ const Index = () => {
       <LoadingIndicator isVisible={isLoading} />
       <CreditsDisplay credits={state.credits} mode={state.mode} />
       <div className="relative z-10 min-h-screen p-8 flex flex-col">
-        {/* Now Playing Ticker - Responsive positioning and sizing */}
-        <div className="absolute top-2 left-2 sm:top-4 sm:left-4 z-20 max-w-[calc(100vw-1rem)] sm:max-w-none">
-          <Card className="bg-black/60 border-yellow-400 shadow-lg backdrop-blur-sm">
-            <CardContent className="p-2 sm:p-3">
-              <div className="text-amber-100 font-bold text-sm sm:text-lg w-[calc(100vw-4rem)] sm:w-[30.7rem] truncate">
-                Now Playing: {state.currentlyPlaying}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+        {/* Now Playing Ticker */}
+        <NowPlayingTicker currentlyPlaying={state.currentlyPlaying} />
 
-        {/* Player Closed Notification - Responsive positioning */}
-        {(!state.playerWindow || state.playerWindow.closed) &&
-          state.isPlayerRunning && (
-            <div className="absolute top-2 right-2 sm:top-4 sm:right-4 z-20 max-w-[calc(100vw-1rem)] sm:max-w-none">
-              <Card className="bg-red-900/80 border-red-400 shadow-lg backdrop-blur-sm">
-                <CardContent className="p-2 sm:p-3">
-                  <div className="flex items-center gap-2 sm:gap-3 flex-col sm:flex-row">
-                    <div className="text-red-100 font-medium text-xs sm:text-sm text-center sm:text-left">
-                      ⚠️ Player Window Closed
-                    </div>
-                    <Button
-                      onClick={() => {
-                        console.log(
-                          "Reopening player window from notification",
-                        );
-                        initializePlayer();
-                      }}
-                      size="sm"
-                      className="bg-red-600 hover:bg-red-700 text-white text-xs px-2 py-1 sm:px-3 sm:py-1 h-auto w-full sm:w-auto"
-                    >
-                      Reopen Player
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-          )}
+        {/* Player Window Closed Warning */}
+        <PlayerClosedNotification
+          playerWindow={state.playerWindow}
+          isPlayerRunning={state.isPlayerRunning}
+          onReopenPlayer={initializePlayer}
+        />
 
         {/* Credits display has been moved to the CreditsDisplay component */}
 
-        <div className="text-center mb-8">
-          {/* Main UI text has been hidden as requested */}
 
-          {/* Mini Player - Responsive sizing */}
-          {state.showMiniPlayer && state.currentVideoId && (
-            <div className="flex justify-center mb-4 sm:mb-8 px-4">
-              <div className="relative w-40 h-24 sm:w-48 sm:h-27 rounded-lg overflow-hidden shadow-2xl">
-                {/* Vignette overlay for feathered edges */}
-                <div className="absolute inset-0 rounded-lg shadow-[inset_0_0_30px_10px_rgba(0,0,0,0.6)] z-10 pointer-events-none"></div>
-                <iframe
-                  src={`https://www.youtube.com/embed/${state.currentVideoId}?autoplay=1&mute=1&controls=0&showinfo=0&rel=0&modestbranding=1&iv_load_policy=3&fs=0&disablekb=1`}
-                  className="w-full h-full border-0"
-                  allow="autoplay; encrypted-media"
-                  allowFullScreen={false}
-                  style={{ pointerEvents: "none" }}
-                />
-              </div>
-            </div>
-          )}
-        </div>
+        {/* Mini Player */}
+        <MiniPlayer
+          videoId={state.currentVideoId}
+          showMiniPlayer={state.showMiniPlayer}
+        />
 
-        {/* Search button positioned above footer with 50px margin */}
-        <div className="flex-1 flex items-center justify-center">
-          {/* This div keeps the original centering in the flex-1 space */}
-        </div>
+        {/* Search Button */}
+        <SearchButton
+          onClick={() =>
+            setState((prev) => ({
+              ...prev,
+              isSearchOpen: true,
+              showKeyboard: true,
+              showSearchResults: false,
+            }))
+          }
+        />
 
-        {/* Responsive search button */}
-        <div className="fixed bottom-[calc(2rem+50px)] left-4 right-4 sm:left-0 sm:right-0 flex justify-center z-20">
-          <Button
-            onClick={() => {
-              console.log("Search button clicked - opening search interface");
-              setState((prev) => ({
-                ...prev,
-                isSearchOpen: true,
-                showKeyboard: true,
-                showSearchResults: false,
-              }));
-            }}
-            className="w-full max-w-96 h-16 sm:h-24 text-xl sm:text-3xl font-bold bg-black/60 text-white shadow-lg border-2 sm:border-4 border-yellow-400 rounded-lg transform hover:scale-105 transition-all duration-200 relative overflow-hidden"
-            style={{ filter: "drop-shadow(-5px -5px 10px rgba(0,0,0,0.8))" }}
-          >
-            <span
-              className="absolute inset-0 bg-black/60 pointer-events-none"
-              style={{ zIndex: 0 }}
-            ></span>
-            <span className="relative z-10">🎵 Search for Music 🎵</span>
-          </Button>
-        </div>
+        {/* Upcoming Queue */}
+        <UpcomingQueue
+          upcomingTitles={getUpcomingTitles()}
+          testMode={state.testMode}
+        />
 
-        {/* Test Mode Indicator - positioned above Coming Up ticker */}
-        {state.testMode && (
-          <div className="fixed bottom-16 left-0 right-0 flex justify-center z-30">
-            <Card className="bg-yellow-600/90 border-yellow-400 backdrop-blur-sm">
-              <CardContent className="p-2 px-4">
-                <div className="text-yellow-100 font-bold text-lg">
-                  TEST MODE ON - 20 Second Videos
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        )}
-
-        {/* Coming Up Ticker - Responsive bottom ticker */}
-        <div className="absolute bottom-0 left-0 right-0 bg-black/80 text-amber-200 py-1 sm:py-2 overflow-hidden">
-          <div
-            className="whitespace-nowrap animate-marquee"
-            key={`${state.currentlyPlaying}-${state.priorityQueue.length}-${state.inMemoryPlaylist.length}`}
-          >
-            <span className="text-sm sm:text-lg font-bold">COMING UP: </span>
-            {getUpcomingTitles().map((title, index) => (
-              <span
-                key={`${index}-${title}`}
-                className="mx-4 sm:mx-8 text-sm sm:text-lg"
-              >
-                {index + 1}. {title}
-              </span>
-            ))}
-          </div>
-        </div>
-
-        {/* Responsive admin button */}
-        <div className="absolute bottom-2 left-2 sm:bottom-4 sm:left-4">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              setState((prev) => ({ ...prev, isAdminOpen: true }));
-            }}
-            className="text-amber-200 hover:text-amber-100 opacity-30 hover:opacity-100 p-1 sm:p-2"
-          >
-            <Settings className="w-3 h-3 sm:w-4 sm:h-4" />
-          </Button>
-        </div>
+        {/* Footer Controls */}
+        <FooterControls
+          onOpenAdmin={() =>
+            setState((prev) => ({ ...prev, isAdminOpen: true }))
+          }
+        />
       </div>
 
       {/* Skip Confirmation Dialog */}
@@ -1449,9 +1240,59 @@ const Index = () => {
           setState((prev) => ({ ...prev, maxSongLength: minutes }))
         }
         defaultPlaylist={state.defaultPlaylist}
-        onDefaultPlaylistChange={(playlistId) =>
-          setState((prev) => ({ ...prev, defaultPlaylist: playlistId }))
-        }
+        onDefaultPlaylistChange={async (playlistId) => {
+          // Update defaultPlaylist in state immediately for UI feedback
+          setState((prev) => ({ ...prev, defaultPlaylist: playlistId }));
+
+          // Try proxy first, then fallback to YouTube Data API if needed
+          let playlistItems = [];
+          let usedFallback = false;
+          try {
+            const { youtubeProxy } = await import("@/services/youtube/proxy");
+            playlistItems = await youtubeProxy.getPlaylist(playlistId);
+          } catch (proxyError) {
+            if (typeof window !== "undefined" && window.console) {
+              console.warn("[Admin] Proxy failed, will try YouTube Data API:", proxyError);
+            }
+          }
+
+          // If proxy failed or returned too few songs, try YouTube Data API
+          if (!playlistItems || playlistItems.length < 10) {
+            usedFallback = true;
+            try {
+              const { youtubeAPIClient } = await import("@/services/youtube/api/client");
+              // Use the current API key from state
+              const apiKey = state.apiKey;
+              playlistItems = await youtubeAPIClient.getPlaylist(playlistId, apiKey);
+              if (typeof window !== "undefined" && window.console) {
+                console.log(`[Admin] Fallback: Loaded ${playlistItems.length} videos from YouTube Data API for playlist ${playlistId}`);
+              }
+            } catch (apiError) {
+              if (typeof window !== "undefined" && window.console) {
+                console.error("[Admin] Fallback YouTube Data API failed:", apiError);
+              }
+            }
+          }
+
+          // Save to localStorage and update state if we got any items
+          if (playlistItems && playlistItems.length > 0) {
+            localStorage.setItem("active_playlist", JSON.stringify(playlistItems));
+            setState((prev) => ({
+              ...prev,
+              defaultPlaylist: playlistId,
+              defaultPlaylistVideos: playlistItems,
+              inMemoryPlaylist: [...playlistItems],
+              currentVideoIndex: 0,
+            }));
+            if (typeof window !== "undefined" && window.console) {
+              console.log(`[Admin] Loaded ${playlistItems.length} videos from ${usedFallback ? "YouTube Data API" : "proxy"} for playlist ${playlistId}`);
+            }
+          } else {
+            if (typeof window !== "undefined" && window.console) {
+              console.error(`[Admin] Failed to load playlist from both proxy and YouTube Data API for playlist ${playlistId}`);
+            }
+          }
+        }}
         currentPlaylistVideos={getCurrentPlaylistForDisplay()}
         onPlaylistReorder={(newPlaylist) =>
           setState((prev) => ({ ...prev, inMemoryPlaylist: newPlaylist }))
@@ -1483,14 +1324,12 @@ const Index = () => {
       />
 
       {/* Display Confirmation Dialog */}
-      {pendingDisplayConfirmation && (
-        <DisplayConfirmationDialog
-          isOpen={true}
-          displayInfo={pendingDisplayConfirmation.displayInfo}
-          onConfirm={handleDisplayConfirmationResponse}
-          onCancel={handleDisplayConfirmationCancel}
-        />
-      )}
+      <DisplayConfirmationDialog
+        isOpen={!!displayConfirmation.pendingDisplayConfirmation}
+        displayInfo={displayConfirmation.pendingDisplayConfirmation?.displayInfo || null}
+        onConfirm={displayConfirmation.handleDisplayConfirmationResponse}
+        onCancel={displayConfirmation.handleDisplayConfirmationCancel}
+      />
 
       {/* API Key Test Dialog */}
       <ApiKeyTestDialog
@@ -1515,8 +1354,9 @@ const Index = () => {
           </div>
         </div>
       )}
+
     </BackgroundDisplay>
   );
-};
 
+}
 export default Index;

@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { RealtimeChannel } from '@supabase/supabase-js';
 import { useToast } from '@/hooks/use-toast';
+import type { RemoteJukeboxState, QueuedRequest } from '@/types/jukebox';
 
 export interface JukeboxCommand {
   type: 'PLAY' | 'PAUSE' | 'NEXT' | 'SKIP' | 'ADD_SONG' | 'REMOVE_SONG' | 'SET_VOLUME' | 'SET_MODE' | 'ADD_CREDITS';
@@ -10,15 +11,8 @@ export interface JukeboxCommand {
   sender: string;
 }
 
-export interface JukeboxState {
-  isPlaying: boolean;
-  currentSong: string;
-  currentVideoId: string;
-  queue: any[];
-  credits: number;
-  mode: 'FREEPLAY' | 'PAID';
-  volume: number;
-}
+// Re-export RemoteJukeboxState for backward compatibility
+export type JukeboxState = RemoteJukeboxState;
 
 interface UseRealtimeSessionOptions {
   sessionCode?: string;

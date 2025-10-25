@@ -14,14 +14,13 @@ import { DisplayInfo } from "@/services/displayManager";
 
 interface DisplayConfirmationDialogProps {
   isOpen: boolean;
-  displayInfo: DisplayInfo;
+  displayInfo: DisplayInfo | null;
   onConfirm: (useFullscreen: boolean, rememberChoice: boolean) => void;
   onCancel: () => void;
 }
 
-export const DisplayConfirmationDialog: React.FC<
-  DisplayConfirmationDialogProps
-> = ({ isOpen, displayInfo, onConfirm, onCancel }) => {
+export const DisplayConfirmationDialog: React.FC<DisplayConfirmationDialogProps> = ({ isOpen, displayInfo, onConfirm, onCancel }) => {
+  if (!displayInfo) return null;
   const [rememberChoice, setRememberChoice] = React.useState(false);
 
   const handleFullscreenConfirm = () => {

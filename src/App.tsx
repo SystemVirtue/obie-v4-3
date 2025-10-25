@@ -5,10 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import Index from "./pages/Index";
-import Auth from "./pages/Auth";
-import Player from "./pages/Player";
 import Admin from "./pages/Admin";
-import Room from "./pages/Room";
 import Remote from "./pages/Remote";
 import NotFound from "./pages/NotFound";
 
@@ -28,10 +25,7 @@ const App = () => (
         <BrowserRouter>
           <Routes>
             <Route path="/" element={<Index />} />
-            <Route path="/auth" element={<Auth />} />
-            <Route path="/player" element={<Player />} />
             <Route path="/admin" element={<Admin />} />
-            <Route path="/room/:roomId" element={<Room />} />
             <Route path="/remote" element={<Remote />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />

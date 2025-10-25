@@ -1,4 +1,4 @@
-import { youtubeHtmlParserService } from "@/services/youtubeHtmlParser";
+import { youtubeHtmlParserService } from "@/services/youtube/scraper";
 import { PlaylistItem } from "@/hooks/useJukeboxState";
 
 /**

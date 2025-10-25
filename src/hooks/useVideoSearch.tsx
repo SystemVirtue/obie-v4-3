@@ -5,7 +5,7 @@ import {
   QueuedRequest,
   LogEntry,
 } from "./useJukeboxState";
-import { musicSearchService } from "@/services/musicSearch";
+import { musicSearchService } from "@/services/youtube/search/searchService";
 
 export const useVideoSearch = (
   state: JukeboxState,

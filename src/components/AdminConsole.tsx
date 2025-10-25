@@ -1,8 +1,9 @@
 import React, { useRef, useState, useEffect } from "react";
-import { youtubeQuotaService, QuotaUsage } from "@/services/youtubeQuota";
+import { youtubeQuotaService, QuotaUsage } from "@/services/youtube/api";
 import { testApiKey, ApiKeyTestResult } from "@/utils/apiKeyTester";
-import { displayManager, DisplayInfo } from "@/services/displayManager";
-import { SearchMethod } from "@/services/musicSearch";
+import { displayManager } from "@/services/displayManager";
+import type { DisplayInfo } from "../types/jukebox";
+import { SearchMethod } from "@/services/youtube/search";
 import { AdminConsoleHealthCheck } from "@/components/AdminConsoleHealthCheck";
 import { PlaylistManager } from "@/components/PlaylistManager";
 import {

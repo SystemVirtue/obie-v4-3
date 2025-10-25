@@ -2,42 +2,16 @@ import React, { useState } from "react";
 import {
   Dialog,
   DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ArrowLeft, X, ExternalLink, Info } from "lucide-react";
+import { X, ExternalLink, Info } from "lucide-react";
+import { SearchInterfaceProps, SearchResult } from "@/types/search";
+import { SearchKeyboard } from "@/components/SearchKeyboard";
+import { VideoResultCard } from "@/components/VideoResultCard";
+import { BackToSearchButton } from "@/components/BackToSearchButton";
 
-interface SearchResult {
-  id: string;
-  title: string;
-  channelTitle: string;
-  thumbnailUrl: string;
-  videoUrl: string;
-  officialScore?: number;
-  duration?: string;
-}
-
-interface IframeSearchInterfaceProps {
-  isOpen: boolean;
-  onClose: () => void;
-  searchQuery: string;
-  onSearchQueryChange: (query: string) => void;
-  searchResults: SearchResult[];
-  isSearching: boolean;
-  showKeyboard: boolean;
-  showSearchResults: boolean;
-  onKeyboardInput: (key: string) => void;
-  onVideoSelect: (video: SearchResult) => void;
-  onBackToSearch: () => void;
-  mode: "FREEPLAY" | "PAID";
-  credits: number;
-  onInsufficientCredits: () => void;
-}
-
-export const IframeSearchInterface: React.FC<IframeSearchInterfaceProps> = ({
+export const IframeSearchInterface: React.FC<SearchInterfaceProps> = ({
   isOpen,
   onClose,
   searchQuery,
@@ -56,18 +30,7 @@ export const IframeSearchInterface: React.FC<IframeSearchInterfaceProps> = ({
   const [videoIdInput, setVideoIdInput] = useState("");
   const [videoTitleInput, setVideoTitleInput] = useState("");
 
-  const keyboardRows = [
-    ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"],
-    ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"],
-    ["A", "S", "D", "F", "G", "H", "J", "K", "L"],
-    ["Z", "X", "C", "V", "B", "N", "M"],
-  ];
-
-  const handleKeyPress = (key: string) => {
-    onKeyboardInput(key);
-  };
-
-  const handleVideoSelect = () => {
+  const handleManualVideoSelect = () => {
     if (mode === "PAID" && credits === 0) {
       onInsufficientCredits();
       return;
@@ -103,6 +66,14 @@ export const IframeSearchInterface: React.FC<IframeSearchInterfaceProps> = ({
     setVideoTitleInput("");
   };
 
+  const handleVideoSelect = (video: SearchResult) => {
+    if (mode === "PAID" && credits === 0) {
+      onInsufficientCredits();
+      return;
+    }
+    onVideoSelect(video);
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -118,92 +89,19 @@ export const IframeSearchInterface: React.FC<IframeSearchInterfaceProps> = ({
         </Button>
 
         {showKeyboard && (
-          <div className="h-full bg-slate-900/20 backdrop-blur-sm text-white p-3 sm:p-6 flex flex-col">
-            <DialogHeader className="mb-3 sm:mb-6">
-              <DialogTitle className="text-xl sm:text-3xl text-center text-amber-200">
-                Search for Music - Iframe Mode
-              </DialogTitle>
-              <DialogDescription className="text-center text-amber-300 text-sm sm:text-base">
-                Use the keyboard below to search for songs. Results will appear
-                in YouTube's embedded search.
-              </DialogDescription>
-            </DialogHeader>
-
-            <div className="mb-4 sm:mb-8">
-              <Input
-                value={searchQuery}
-                onChange={(e) => onSearchQueryChange(e.target.value)}
-                placeholder="Enter song or artist..."
-                className="w-full h-12 sm:h-16 text-lg sm:text-2xl bg-slate-800/60 backdrop-blur border-slate-600 text-white placeholder-slate-400"
-                readOnly
-              />
-            </div>
-
-            <div className="flex-1 flex flex-col justify-center space-y-4">
-              {keyboardRows.map((row, rowIndex) => (
-                <div key={rowIndex} className="flex justify-center gap-2">
-                  {row.map((key) => (
-                    <Button
-                      key={key}
-                      onClick={() => handleKeyPress(key)}
-                      className="w-8 h-8 sm:w-20 sm:h-16 text-sm sm:text-xl font-bold bg-gradient-to-b from-slate-600 to-slate-700 hover:from-slate-500 hover:to-slate-600 border-2 border-slate-500 shadow-lg transform hover:scale-95 active:scale-90 transition-all duration-100"
-                      style={{
-                        filter: "drop-shadow(-5px -5px 10px rgba(0,0,0,0.8))",
-                      }}
-                    >
-                      {key}
-                    </Button>
-                  ))}
-                </div>
-              ))}
-
-              <div className="flex justify-center gap-1 sm:gap-2 mt-2 sm:mt-4">
-                <Button
-                  onClick={() => handleKeyPress("SPACE")}
-                  className="w-20 h-8 sm:w-40 sm:h-16 text-sm sm:text-xl font-bold bg-gradient-to-b from-slate-600 to-slate-700 hover:from-slate-500 hover:to-slate-600 border-2 border-slate-500 shadow-lg transform hover:scale-95 active:scale-90 transition-all duration-100"
-                  style={{
-                    filter: "drop-shadow(-5px -5px 10px rgba(0,0,0,0.8))",
-                  }}
-                >
-                  SPACE
-                </Button>
-                <Button
-                  onClick={() => handleKeyPress("BACKSPACE")}
-                  className="w-16 h-8 sm:w-32 sm:h-16 text-sm sm:text-xl font-bold bg-gradient-to-b from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 border-2 border-red-500 shadow-lg transform hover:scale-95 active:scale-90 transition-all duration-100"
-                  style={{
-                    filter: "drop-shadow(-5px -5px 10px rgba(0,0,0,0.8))",
-                  }}
-                >
-                  ⌫
-                </Button>
-                <Button
-                  onClick={() => handleKeyPress("SEARCH")}
-                  disabled={!searchQuery.trim()}
-                  className="w-16 h-8 sm:w-32 sm:h-16 text-sm sm:text-xl font-bold bg-gradient-to-b from-green-600 to-green-700 hover:from-green-500 hover:to-green-600 border-2 border-green-500 shadow-lg transform hover:scale-95 active:scale-90 transition-all duration-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{
-                    filter: "drop-shadow(-5px -5px 10px rgba(0,0,0,0.8))",
-                  }}
-                >
-                  SEARCH
-                </Button>
-              </div>
-            </div>
-          </div>
+          <SearchKeyboard
+            searchQuery={searchQuery}
+            onSearchQueryChange={onSearchQueryChange}
+            onKeyPress={onKeyboardInput}
+            title="Search for Music - Iframe Mode"
+            description="Use the keyboard below to search for songs. Results will appear in YouTube's embedded search."
+          />
         )}
 
         {showSearchResults && (
           <div className="h-full bg-slate-900/20 backdrop-blur-sm text-white flex flex-col">
             <div className="p-4 border-b border-slate-700 flex items-center justify-between bg-slate-800/60 backdrop-blur">
-              <Button
-                onClick={onBackToSearch}
-                className="flex items-center gap-2 bg-amber-600 hover:bg-amber-700 text-white px-6 py-3 text-lg"
-                style={{
-                  filter: "drop-shadow(-5px -5px 10px rgba(0,0,0,0.8))",
-                }}
-              >
-                <ArrowLeft className="w-5 h-5" />
-                Back to Search
-              </Button>
+              <BackToSearchButton onClick={onBackToSearch} />
 
               <div className="flex items-center gap-2 text-amber-200">
                 <Info className="w-5 h-5" />
@@ -238,38 +136,12 @@ export const IframeSearchInterface: React.FC<IframeSearchInterfaceProps> = ({
                   <div className="space-y-2 max-h-96 overflow-y-auto">
                     {searchResults.length > 0 ? (
                       searchResults.slice(0, 10).map((video) => (
-                        <div
+                        <VideoResultCard
                           key={video.id}
-                          onClick={() => {
-                            if (mode === "PAID" && credits === 0) {
-                              onInsufficientCredits();
-                              return;
-                            }
-                            onVideoSelect(video);
-                          }}
-                          className="bg-slate-700/60 rounded-lg p-3 cursor-pointer hover:bg-slate-600/60 transition-colors border border-slate-600 hover:border-amber-500"
-                        >
-                          <div className="flex gap-3">
-                            <img
-                              src={video.thumbnailUrl}
-                              alt={video.title}
-                              className="w-16 h-12 object-cover rounded"
-                            />
-                            <div className="flex-1 min-w-0">
-                              <h4 className="text-white text-sm font-medium line-clamp-2 mb-1">
-                                {video.title}
-                              </h4>
-                              <p className="text-slate-400 text-xs">
-                                {video.channelTitle}
-                              </p>
-                              {video.duration && (
-                                <p className="text-slate-300 text-xs mt-1">
-                                  {video.duration}
-                                </p>
-                              )}
-                            </div>
-                          </div>
-                        </div>
+                          video={video}
+                          onClick={handleVideoSelect}
+                          variant="list"
+                        />
                       ))
                     ) : (
                       <div className="text-center py-8">
@@ -299,7 +171,7 @@ export const IframeSearchInterface: React.FC<IframeSearchInterfaceProps> = ({
                               className="w-full bg-slate-700/60 border-slate-600 text-white placeholder-slate-400 text-xs"
                             />
                             <Button
-                              onClick={handleVideoSelect}
+                              onClick={handleManualVideoSelect}
                               disabled={
                                 !videoIdInput.trim() ||
                                 !videoTitleInput.trim() ||

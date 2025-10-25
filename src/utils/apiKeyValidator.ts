@@ -2,7 +2,7 @@
  * Utility to determine if API key testing is needed
  */
 
-import { youtubeQuotaService } from "@/services/youtubeQuota";
+import { youtubeQuotaService } from "@/services/youtube/api";
 
 export interface KeyValidationResult {
   shouldTest: boolean;

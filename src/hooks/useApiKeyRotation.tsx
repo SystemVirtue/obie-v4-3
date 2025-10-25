@@ -1,6 +1,6 @@
 import { useEffect, useCallback } from "react";
 import { JukeboxState } from "./useJukeboxState";
-import { youtubeQuotaService } from "@/services/youtubeQuota";
+import { youtubeQuotaService } from "@/services/youtube/api";
 
 export const useApiKeyRotation = (
   state: JukeboxState,

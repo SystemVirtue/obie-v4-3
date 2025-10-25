@@ -1,6 +1,6 @@
 import { JukeboxState, PlaylistItem, LogEntry } from "./useJukeboxState";
-import { youtubeQuotaService } from "@/services/youtubeQuota";
-import { youtubeHtmlParserService } from "@/services/youtubeHtmlParser";
+import { youtubeQuotaService } from "@/services/youtube/api";
+import { youtubeHtmlParserService } from "@/services/youtube/scraper";
 import React from "react"; // Import React to use useRef and useCallback
 
 export const usePlaylistManager = (

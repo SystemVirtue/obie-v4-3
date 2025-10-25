@@ -298,9 +298,28 @@ export const usePlayerManager = (
         if (playerWindow) {
           console.log("[InitPlayer] Player window opened successfully");
 
+          /**
+           * CHANGELOG - 2025-01-XX
+           * ADDED: Window position/size tracking on resize and close
+           */
+          const currentDisplayId = targetDisplay.id;
+          
+          // Track window resize events
+          const handleResize = () => {
+            if (playerWindow && !playerWindow.closed) {
+              displayManager.savePlayerWindowState(playerWindow, currentDisplayId);
+            }
+          };
+          
           // Track player window close events
           const handlePlayerWindowClose = () => {
             console.log("[InitPlayer] Player window closed by user");
+            
+            // Save final window state before closing
+            if (playerWindow && !playerWindow.closed) {
+              displayManager.savePlayerWindowState(playerWindow, currentDisplayId);
+            }
+            
             localStorage.setItem(
               "jukeboxPlayerWindowState",
               JSON.stringify({
@@ -310,6 +329,14 @@ export const usePlayerManager = (
               }),
             );
           };
+          
+          // Attach resize listener after window loads
+          playerWindow.addEventListener('load', () => {
+            playerWindow.addEventListener('resize', handleResize);
+            
+            // Save initial position after load
+            displayManager.savePlayerWindowState(playerWindow, currentDisplayId);
+          }, { once: true });
 
           // Set up close event listener
           playerWindow.addEventListener(
@@ -337,16 +364,40 @@ export const usePlayerManager = (
             isPlayerRunning: true,
           }));
 
+          /**
+           * CHANGELOG - 2025-01-XX
+           * MODIFIED: Enhanced fullscreen enforcement with multiple attempts
+           */
           // Request fullscreen if needed and supported
           if (useFullscreen) {
             playerWindow.addEventListener("load", () => {
-              setTimeout(() => {
+              const requestFullscreen = () => {
                 try {
-                  playerWindow.document.documentElement.requestFullscreen();
+                  if (!playerWindow.document.fullscreenElement) {
+                    playerWindow.document.documentElement.requestFullscreen({
+                      navigationUI: 'hide'
+                    }).catch((err) => {
+                      console.warn('[Fullscreen] Request failed:', err);
+                    });
+                  }
                 } catch (error) {
                   console.warn("Could not enter fullscreen mode:", error);
                 }
-              }, 1000);
+              };
+              
+              // Try immediately
+              setTimeout(requestFullscreen, 500);
+              
+              // Try again after delay (some browsers need this)
+              setTimeout(requestFullscreen, 1500);
+              
+              // Watch for fullscreen exit and re-request
+              playerWindow.document.addEventListener('fullscreenchange', () => {
+                if (!playerWindow.document.fullscreenElement) {
+                  console.log('[Fullscreen] User exited fullscreen, re-requesting...');
+                  setTimeout(requestFullscreen, 100);
+                }
+              });
             });
           }
 

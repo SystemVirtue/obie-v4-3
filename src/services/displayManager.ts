@@ -17,6 +17,18 @@ interface DisplayPreference {
 }
 
 /**
+ * CHANGELOG - 2025-01-XX
+ * ADDED: Player window position/size tracking
+ */
+interface PlayerWindowState {
+  position: { x: number; y: number };
+  size: { width: number; height: number };
+  displayId: string;
+  isFullscreen: boolean;
+  lastUpdated: string;
+}
+
+/**
  * DisplayManager - Handles external display detection and window positioning
  *
  * Features:
@@ -343,7 +355,70 @@ class DisplayManager {
     }
     return this.playerWindow;
   }
+
+  /**
+   * CHANGELOG - 2025-01-XX
+   * ADDED: Window position/size persistence methods
+   */
+  
+  // Save player window position and size
+  savePlayerWindowState(window: Window, displayId: string): void {
+    try {
+      const state: PlayerWindowState = {
+        position: { 
+          x: window.screenX || window.screenLeft || 0, 
+          y: window.screenY || window.screenTop || 0
+        },
+        size: { 
+          width: window.outerWidth || 800, 
+          height: window.outerHeight || 600
+        },
+        displayId,
+        isFullscreen: !!window.document.fullscreenElement,
+        lastUpdated: new Date().toISOString()
+      };
+      
+      localStorage.setItem('PLAYER_WINDOW_STATE', JSON.stringify(state));
+      console.log('[DisplayManager] Saved window state:', state);
+    } catch (error) {
+      console.error('[DisplayManager] Failed to save window state:', error);
+    }
+  }
+
+  // Get saved player window position and size
+  getPlayerWindowState(): PlayerWindowState | null {
+    try {
+      const stored = localStorage.getItem('PLAYER_WINDOW_STATE');
+      if (!stored) return null;
+      
+      const state = JSON.parse(stored) as PlayerWindowState;
+      
+      // Verify state is not too old (>7 days)
+      const lastUpdated = new Date(state.lastUpdated);
+      const daysSinceUpdate = (Date.now() - lastUpdated.getTime()) / (1000 * 60 * 60 * 24);
+      
+      if (daysSinceUpdate > 7) {
+        console.log('[DisplayManager] Window state is stale, ignoring');
+        return null;
+      }
+      
+      return state;
+    } catch (error) {
+      console.error('[DisplayManager] Failed to load window state:', error);
+      return null;
+    }
+  }
+
+  // Clear saved window state
+  clearPlayerWindowState(): void {
+    try {
+      localStorage.removeItem('PLAYER_WINDOW_STATE');
+      console.log('[DisplayManager] Cleared window state');
+    } catch (error) {
+      console.error('[DisplayManager] Failed to clear window state:', error);
+    }
+  }
 }
 
 export const displayManager = new DisplayManager();
-export type { DisplayInfo, DisplayPreference };
+export type { DisplayInfo, DisplayPreference, PlayerWindowState };

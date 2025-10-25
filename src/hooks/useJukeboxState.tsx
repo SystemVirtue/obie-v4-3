@@ -132,6 +132,36 @@ const loadUserPreferences = (): Partial<JukeboxState> => {
   }
 };
 
+/**
+ * CHANGELOG - 2025-01-XX
+ * ADDED: Priority queue persistence to localStorage
+ */
+// Load priority queue from localStorage
+const loadPriorityQueue = (): QueuedRequest[] => {
+  try {
+    const saved = localStorage.getItem("PRIORITY_QUEUE");
+    if (!saved) return [];
+    
+    const parsed = JSON.parse(saved);
+    
+    // Validate queue items
+    if (!Array.isArray(parsed)) {
+      console.warn("[PriorityQueue] Invalid queue data, resetting");
+      return [];
+    }
+    
+    const validQueue = parsed.filter((item: any) => 
+      item.videoId && item.title && item.channelTitle && item.id && item.timestamp
+    );
+    
+    console.log(`[PriorityQueue] Loaded ${validQueue.length} items from localStorage`);
+    return validQueue;
+  } catch (error) {
+    console.error("[PriorityQueue] Error loading priority queue:", error);
+    return [];
+  }
+};
+
 // Save user preferences to localStorage (exclude runtime state)
 const saveUserPreferences = (state: JukeboxState) => {
   try {
@@ -163,11 +193,12 @@ const saveUserPreferences = (state: JukeboxState) => {
 
 export const useJukeboxState = () => {
   const userPreferences = loadUserPreferences();
+  const savedPriorityQueue = loadPriorityQueue();
   
   const [state, setState] = useState<JukeboxState>({
     mode: (userPreferences.mode as "FREEPLAY" | "PAID") || "PAID",
     credits: userPreferences.credits ?? 0,
-    priorityQueue: [],
+    priorityQueue: savedPriorityQueue,
     defaultPlaylist: userPreferences.defaultPlaylist || DEFAULT_PLAYLIST_ID,
     defaultPlaylistVideos: [],
     inMemoryPlaylist: [],

@@ -584,10 +584,26 @@ export const usePlaylistManager = (
 
         console.log('[PlayNext] Next priority song:', nextRequest.title, 'VideoID:', nextRequest.videoId);
 
-        setState(prev => ({
-          ...prev,
-          priorityQueue: prev.priorityQueue.slice(1),
-        }));
+        /**
+         * CHANGELOG - 2025-01-XX
+         * ADDED: Priority queue persistence when removing played songs
+         */
+        setState(prev => {
+          const newQueue = prev.priorityQueue.slice(1);
+          
+          // Save updated queue to localStorage
+          try {
+            localStorage.setItem('PRIORITY_QUEUE', JSON.stringify(newQueue));
+            console.log('[PlayNext] Saved updated priority queue to localStorage');
+          } catch (error) {
+            console.error('[PlayNext] Failed to save priority queue:', error);
+          }
+
+          return {
+            ...prev,
+            priorityQueue: newQueue,
+          };
+        });
 
         lastPlayedVideoId.current = nextRequest.videoId;
         playSong(
@@ -656,21 +672,41 @@ export const usePlaylistManager = (
     playNextSong();
   }, [playNextSong]);
 
+  /**
+   * CHANGELOG - 2025-01-XX
+   * ADDED: Playlist URL validation before loading
+   */
   const handleDefaultPlaylistChange = async (playlistId: string) => {
     console.log("[PlaylistManager] Playlist selection changed to:", playlistId);
     
-    // Update state with new playlist ID
-    setState((prev) => ({ ...prev, defaultPlaylist: playlistId }));
+    // Validate playlist URL/ID before proceeding
+    const { validatePlaylistUrl } = await import('@/utils/playlistValidator');
+    const validation = validatePlaylistUrl(playlistId);
     
-    // Save to localStorage immediately
-    localStorage.setItem('active_playlist_url', playlistId);
+    if (!validation.isValid) {
+      console.error("[PlaylistManager] Invalid playlist URL:", validation.error);
+      toast({
+        title: "Invalid Playlist",
+        description: validation.error || "Please enter a valid YouTube playlist URL or ID",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    const validatedId = validation.playlistId!;
+    console.log("[PlaylistManager] Validated playlist ID:", validatedId);
+    
+    // Update state with new playlist ID
+    setState((prev) => ({ ...prev, defaultPlaylist: validatedId }));
+    
+    // Save to localStorage immediately (remove duplicate active_playlist_url)
     localStorage.setItem('USER_PREFERENCES', JSON.stringify({
       ...JSON.parse(localStorage.getItem('USER_PREFERENCES') || '{}'),
-      defaultPlaylist: playlistId
+      defaultPlaylist: validatedId
     }));
     
     // Load the playlist immediately (this will update the queue, not interrupt current song)
-    await loadPlaylistVideos(playlistId);
+    await loadPlaylistVideos(validatedId);
     
     toast({
       title: "Playlist Changed",

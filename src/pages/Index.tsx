@@ -641,55 +641,8 @@ function Index() {
         }
 
         // Handle video ended - ensure proper progression to next song
-        if (status.status === "ended" || status.status === "testModeComplete") {
-          const statusVideoId = status.id || status.videoId;
-          console.log(
-            "[StorageEvent] Video ended/testModeComplete. Status video ID:",
-            statusVideoId,
-          );
-          console.log(
-            "[StorageEvent] Current state video ID:",
-            currentState.currentVideoId,
-          );
-
-          if (statusVideoId && statusVideoId === currentState.currentVideoId) {
-            console.log("[StorageEvent] Video IDs match, processing end event");
-            setState((prev) => ({
-              ...prev,
-              currentlyPlaying: "Loading...",
-              currentVideoId: "",
-            }));
-
-            // Ensure autoplay of next song
-            setTimeout(() => {
-              console.log(
-                "[StorageEvent] Triggering handleVideoEnded for autoplay",
-              );
-              handleVideoEndedRef.current();
-
-              // Force update of coming up titles after video change
-              setTimeout(() => {
-                setState((prev) => ({ ...prev }));
-              }, 500);
-            }, 500);
-
-            // Safety timeout: if still loading after 10 seconds, force next song
-            setTimeout(() => {
-              setState((currentState) => {
-                if (currentState.currentlyPlaying === "Loading...") {
-                  console.warn(
-                    "[StorageEvent] Still loading after 10s, forcing next song",
-                  );
-                  handleVideoEndedRef.current();
-                  return { ...currentState, currentlyPlaying: "Recovering..." };
-                }
-                return currentState;
-              });
-            }, 10000);
-          } else {
-            console.log("[StorageEvent] Video ID mismatch, ignoring end event");
-          }
-        }
+        // REMOVED: This logic is now handled by useStorageSync hook to prevent double-triggering
+        // if (status.status === "ended" || status.status === "testModeComplete") {
 
         // Handle fade complete
         if (status.status === "fadeComplete") {
@@ -738,52 +691,8 @@ function Index() {
         }
 
         // Handle video unavailable/error - auto-skip with enhanced sync
-        if (status.status === "error" || status.status === "unavailable") {
-          const statusVideoId = status.id;
-          console.log(
-            "[StorageEvent] Video error/unavailable. Status video ID:",
-            statusVideoId,
-          );
-
-          if (statusVideoId && statusVideoId === currentState.currentVideoId) {
-            console.log("[StorageEvent] Auto-skipping unavailable video");
-            addLog(
-              "SONG_PLAYED",
-              `Auto-skipping unavailable video: ${currentState.currentlyPlaying}`,
-            );
-            setState((prev) => ({
-              ...prev,
-              currentlyPlaying: "Loading...",
-              currentVideoId: "",
-            }));
-
-            setTimeout(() => {
-              console.log(
-                "[StorageEvent] Triggering handleVideoEnded after error",
-              );
-              handleVideoEndedRef.current();
-
-              // Force update of coming up titles after error skip
-              setTimeout(() => {
-                setState((prev) => ({ ...prev }));
-              }, 500);
-            }, 1000);
-
-            // Safety timeout for error case
-            setTimeout(() => {
-              setState((currentState) => {
-                if (currentState.currentlyPlaying === "Loading...") {
-                  console.warn(
-                    "[StorageEvent] Still loading after error timeout, forcing next song",
-                  );
-                  handleVideoEndedRef.current();
-                  return { ...currentState, currentlyPlaying: "Recovering..." };
-                }
-                return currentState;
-              });
-            }, 11000); // 1000ms initial delay + 10000ms safety
-          }
-        }
+        // REMOVED: This logic is now handled by useStorageSync hook to prevent double-triggering
+        // if (status.status === "error" || status.status === "unavailable") {
 
         // Handle player ready status
         if (status.status === "ready") {

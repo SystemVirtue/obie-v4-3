@@ -880,11 +880,8 @@ export const usePlayerManager = (
         const nextRequest = state.priorityQueue[0];
         console.log(`[PlayNext][${timestamp}] Playing next song from priority queue: "${nextRequest.title}" (${nextRequest.videoId})`);
         
-        // Update state first
-        setState(prev => ({ 
-          ...prev, 
-          priorityQueue: prev.priorityQueue.slice(1) 
-        }));
+        // CRITICAL FIX: Don't remove from priority queue here - only remove when song finishes
+        // Removal now happens in handleVideoEnded()
         
         // Then play the song
         playSong(nextRequest.videoId, nextRequest.title, nextRequest.channelTitle, 'USER_SELECTION');

@@ -572,26 +572,8 @@ export const usePlaylistManager = (
 
         console.log('[PlayNext] Next priority song:', nextRequest.title, 'VideoID:', nextRequest.videoId);
 
-        /**
-         * CHANGELOG - 2025-01-XX
-         * ADDED: Priority queue persistence when removing played songs
-         */
-        setState(prev => {
-          const newQueue = prev.priorityQueue.slice(1);
-          
-          // Save updated queue to localStorage
-          try {
-            localStorage.setItem('PRIORITY_QUEUE', JSON.stringify(newQueue));
-            console.log('[PlayNext] Saved updated priority queue to localStorage');
-          } catch (error) {
-            console.error('[PlayNext] Failed to save priority queue:', error);
-          }
-
-          return {
-            ...prev,
-            priorityQueue: newQueue,
-          };
-        });
+        // CRITICAL FIX: Don't remove from priority queue here - only remove when song finishes
+        // Removal now happens in handleVideoEnded()
 
         lastPlayedVideoId.current = nextRequest.videoId;
         playSong(
@@ -647,9 +629,32 @@ export const usePlaylistManager = (
   }, [state.priorityQueue, state.inMemoryPlaylist, state.currentlyPlaying, playSong, setState]); // Added state.currentlyPlaying to dependencies
 
   const handleVideoEnded = React.useCallback(() => {
-    console.log('[VideoEnded] Video ended, triggering playNextSong...');
+    console.log('[VideoEnded] Video ended, removing from priority queue if applicable and triggering next song...');
+
+    // CRITICAL FIX: Only remove from priority queue when song actually finishes
+    if (state.priorityQueue.length > 0) {
+      console.log('[VideoEnded] Removing completed priority song from queue');
+      setState(prev => {
+        const newQueue = prev.priorityQueue.slice(1);
+
+        // Save updated queue to localStorage
+        try {
+          localStorage.setItem('PRIORITY_QUEUE', JSON.stringify(newQueue));
+          console.log('[VideoEnded] Saved updated priority queue to localStorage');
+        } catch (error) {
+          console.error('[VideoEnded] Failed to save priority queue:', error);
+        }
+
+        return {
+          ...prev,
+          priorityQueue: newQueue,
+        };
+      });
+    }
+
+    // Then play the next song
     playNextSong();
-  }, [playNextSong]);
+  }, [playNextSong, state.priorityQueue.length]);
 
   /**
    * CHANGELOG - 2025-01-XX

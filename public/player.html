@@ -32,6 +32,8 @@
     #player {
       width: 100%;
       height: 100%;
+      opacity: 1;
+      transition: opacity 0.05s ease-out;
     }
     
     #now-playing {
@@ -227,6 +229,12 @@
               startSeconds: 0
             });
             
+            // Reset opacity for new video
+            const playerElement = document.getElementById('player');
+            if (playerElement) {
+              playerElement.style.opacity = '1';
+            }
+            
             // Set video quality if specified
             if (command.videoQuality && command.videoQuality !== 'auto') {
               // Map our quality names to YouTube quality levels
@@ -280,6 +288,10 @@
           fadeOutAndComplete();
           break;
           
+        case 'fadeOutAndBlack':
+          fadeOutAndComplete();
+          break;
+          
         case 'volume':
           if (command.volume !== undefined) {
             player.setVolume(command.volume);
@@ -318,7 +330,7 @@
     }
 
     function fadeOutAndComplete() {
-      console.log('[Player] Fading out...');
+      console.log('[Player] Fading out with volume and opacity...');
       
       // Clear test mode timeout if exists
       if (testModeTimeout) {
@@ -327,19 +339,35 @@
       }
       
       const startVolume = player.getVolume();
-      const fadeSteps = 20;
+      const playerElement = document.getElementById('player');
+      const fadeSteps = 40; // 40 steps * 50ms = 2 seconds
       const fadeInterval = 50; // ms per step
       let currentStep = 0;
       
       const fadeTimer = setInterval(() => {
         currentStep++;
-        const newVolume = startVolume * (1 - currentStep / fadeSteps);
+        const progress = currentStep / fadeSteps;
+        
+        // Fade volume from startVolume to 0
+        const newVolume = startVolume * (1 - progress);
         player.setVolume(Math.max(0, newVolume));
+        
+        // Fade opacity from 1 to 0
+        const newOpacity = 1 - progress;
+        if (playerElement) {
+          playerElement.style.opacity = Math.max(0, newOpacity);
+        }
         
         if (currentStep >= fadeSteps) {
           clearInterval(fadeTimer);
           player.pauseVideo();
           player.setVolume(startVolume); // Restore volume for next song
+          
+          // Reset opacity for next song
+          if (playerElement) {
+            playerElement.style.opacity = '1';
+          }
+          
           sendStatus('fadeComplete', 'Fade complete', currentVideoId);
           currentVideoId = '';
         }

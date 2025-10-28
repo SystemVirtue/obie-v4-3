@@ -17,12 +17,9 @@ export const usePlayerManager = (
     onConfirm: (useFullscreen: boolean, rememberChoice: boolean) => void,
     onCancel: () => void,
   ) => void,
-) => {
+  ) => {
   const { toast } = useToast();
-  const isProcessingNextSong = React.useRef(false);
-  const lastPlayedSongRef = React.useRef<{ videoId: string; timestamp: number } | null>(null);
-
-  const playSong = (
+  const lastPlayedSongRef = React.useRef<{ videoId: string; timestamp: number } | null>(null);  const playSong = (
     videoId: string,
     title: string,
     artist: string,
@@ -859,72 +856,82 @@ export const usePlayerManager = (
     return shuffled;
   };
 
-  const playNextSong = () => {
-    const timestamp = new Date().toISOString();
-    console.log(`[PlayNext][${timestamp}] playNextSong called - checking if already processing...`);
-    
-    // Prevent multiple concurrent executions
-    if (isProcessingNextSong.current) {
-      console.warn(`[PlayNext][${timestamp}] Already processing next song, ignoring duplicate call`);
-      return;
-    }
-    
-    isProcessingNextSong.current = true;
-    console.log(`[PlayNext][${timestamp}] Starting song selection process`);
-    console.log(`[PlayNext][${timestamp}] Priority queue length: ${state.priorityQueue.length}`);
-    console.log(`[PlayNext][${timestamp}] In-memory playlist length: ${state.inMemoryPlaylist.length}`);
-    
-    try {
-      // Always check priority queue first
-      if (state.priorityQueue.length > 0) {
-        const nextRequest = state.priorityQueue[0];
-        console.log(`[PlayNext][${timestamp}] Playing next song from priority queue: "${nextRequest.title}" (${nextRequest.videoId})`);
-        
-        // CRITICAL FIX: Don't remove from priority queue here - only remove when song finishes
-        // Removal now happens in handleVideoEnded()
-        
-        // Then play the song
-        playSong(nextRequest.videoId, nextRequest.title, nextRequest.channelTitle, 'USER_SELECTION');
+  const playNextSong = (() => {
+    // Replace unreliable flag with proper queue/debounce mechanism
+    const playNextSongQueue = React.useRef<Promise<void> | null>(null);
+    const lastPlayNextSongCall = React.useRef(0);
+
+    return async () => {
+      const now = Date.now();
+      const timestamp = new Date().toISOString();
+
+      // Prevent calls more frequent than 500ms apart (debouncing)
+      if (now - lastPlayNextSongCall.current < 500) {
+        console.log(`[PlayNext][${timestamp}] Call too frequent, debouncing`);
         return;
       }
-      
-      // Play from in-memory playlist - SEQUENTIAL ORDER
-      if (state.inMemoryPlaylist.length > 0) {
-        const nextVideo = state.inMemoryPlaylist[0];
-        console.log(`[PlayNext][${timestamp}] Playing next song from in-memory playlist: "${nextVideo.title}" (${nextVideo.videoId})`);
-        
-        // Move played song to end of playlist (circular playlist)
-        setState(prev => ({ 
-          ...prev, 
-          inMemoryPlaylist: [...prev.inMemoryPlaylist.slice(1), nextVideo]
-        }));
-        
-        // Then play the song
-        playSong(nextVideo.videoId, nextVideo.title, nextVideo.channelTitle, 'SONG_PLAYED');
-      } else {
-        console.warn(`[PlayNext][${timestamp}] No songs available in playlist or priority queue!`);
+      lastPlayNextSongCall.current = now;
+
+      // Queue the operation to prevent concurrent execution
+      if (playNextSongQueue.current) {
+        console.log(`[PlayNext][${timestamp}] Operation already queued, waiting...`);
+        await playNextSongQueue.current;
+        return;
       }
-    } catch (error) {
-      console.error(`[PlayNext][${timestamp}] Error in playNextSong:`, error);
-    } finally {
-      // Reset the processing flag after a short delay to ensure state updates complete
-      setTimeout(() => {
-        console.log(`[PlayNext][${new Date().toISOString()}] Resetting processing flag after operation`);
-        isProcessingNextSong.current = false;
-      }, 1000);
-    }
-  };
+
+      // Create a new queued operation
+      playNextSongQueue.current = (async () => {
+        console.log(`[PlayNext][${timestamp}] Starting song selection process`);
+        console.log(`[PlayNext][${timestamp}] Priority queue length: ${state.priorityQueue.length}`);
+        console.log(`[PlayNext][${timestamp}] In-memory playlist length: ${state.inMemoryPlaylist.length}`);
+
+        try {
+          // Always check priority queue first
+          if (state.priorityQueue.length > 0) {
+            const nextRequest = state.priorityQueue[0];
+            console.log(`[PlayNext][${timestamp}] Playing next song from priority queue: "${nextRequest.title}" (${nextRequest.videoId})`);
+
+            // CRITICAL FIX: Don't remove from priority queue here - only remove when song finishes
+            // Removal now happens in handleVideoEnded()
+
+            // Then play the song
+            playSong(nextRequest.videoId, nextRequest.title, nextRequest.channelTitle, 'USER_SELECTION');
+            return;
+          }
+
+          // Play from in-memory playlist - SEQUENTIAL ORDER
+          if (state.inMemoryPlaylist.length > 0) {
+            const nextVideo = state.inMemoryPlaylist[0];
+            console.log(`[PlayNext][${timestamp}] Playing next song from in-memory playlist: "${nextVideo.title}" (${nextVideo.videoId})`);
+
+            // Move played song to end of playlist (circular playlist)
+            setState(prev => ({
+              ...prev,
+              inMemoryPlaylist: [...prev.inMemoryPlaylist.slice(1), nextVideo]
+            }));
+
+            // Then play the song
+            playSong(nextVideo.videoId, nextVideo.title, nextVideo.channelTitle, 'SONG_PLAYED');
+          } else {
+            console.warn(`[PlayNext][${timestamp}] No songs available in playlist or priority queue!`);
+          }
+        } catch (error) {
+          console.error(`[PlayNext][${timestamp}] Error in playNextSong:`, error);
+        } finally {
+          // Clear the queue after completion
+          playNextSongQueue.current = null;
+        }
+      })();
+
+      // Wait for the queued operation to complete
+      await playNextSongQueue.current;
+    };
+  })();
 
   const handleVideoEnded = () => {
     const timestamp = new Date().toISOString();
     console.log(`[VideoEnded][${timestamp}] Video ended, triggering playNextSong...`);
     playNextSong();
-    
-    // Reset the processing flag after a short delay to allow state updates to complete
-    setTimeout(() => {
-      console.log(`[VideoEnded][${timestamp}] Resetting processing flag`);
-      isProcessingNextSong.current = false;
-    }, 1000); // 1 second delay to ensure state updates complete
   };
 
   const handleDefaultPlaylistChange = (playlistId: string) => {

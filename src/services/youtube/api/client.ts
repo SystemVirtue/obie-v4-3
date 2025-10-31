@@ -5,6 +5,7 @@
 
 import { config } from '@/config';
 import { Video, PlaylistItem } from '@/types/jukebox';
+import { apiCacheService } from '@/services/apiCache';
 
 export interface YouTubeAPIError {
   code: number;
@@ -20,7 +21,7 @@ export class YouTubeAPIClient {
   private readonly BASE_URL = 'https://www.googleapis.com/youtube/v3';
   
   /**
-   * Make a generic YouTube API request
+   * Make a generic YouTube API request with caching
    */
   private async makeRequest<T>(
     endpoint: string,
@@ -35,31 +36,62 @@ export class YouTubeAPIClient {
     });
     url.searchParams.append('key', apiKey);
 
+    const fullUrl = url.toString();
+    const cacheKey = apiCacheService.generateYouTubeCacheKey(endpoint, { ...params, key: apiKey });
+
     console.log(`[YouTube API] ${endpoint} request:`, params);
 
-    const response = await fetch(url.toString());
-    const data = await response.json();
+    try {
+      const data = await apiCacheService.cachedFetch<T>(
+        fullUrl,
+        {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json',
+          },
+        },
+        cacheKey,
+        15 * 60 * 1000 // 15 minutes TTL
+      );
 
-    if (!response.ok) {
-      const error = data as { error: YouTubeAPIError };
-      console.error(`[YouTube API] ${endpoint} error:`, error);
-      
-      // Throw specific error based on status code
-      if (response.status === 403) {
-        if (error.error.errors?.[0]?.reason === 'quotaExceeded') {
-          throw new Error('QUOTA_EXCEEDED');
+      return data;
+    } catch (error: any) {
+      // If it's a fetch error, check if it's an API error
+      if (error.message?.includes('API request failed')) {
+        // Try to parse the error response
+        try {
+          const response = await fetch(fullUrl);
+          const errorData = await response.json();
+          
+          if (!response.ok) {
+            const apiError = errorData as { error: YouTubeAPIError };
+            console.error(`[YouTube API] ${endpoint} error:`, apiError);
+            
+            // Throw specific error based on status code
+            if (response.status === 403) {
+              if (apiError.error.errors?.[0]?.reason === 'quotaExceeded') {
+                throw new Error('QUOTA_EXCEEDED');
+              }
+              throw new Error('API_KEY_INVALID');
+            }
+            
+            if (response.status === 400) {
+              throw new Error('INVALID_REQUEST');
+            }
+            
+            throw new Error(apiError.error.message || 'YouTube API request failed');
+          }
+          
+          return errorData;
+        } catch (parseError) {
+          // If we can't parse the error, re-throw the original error
+          throw error;
         }
-        throw new Error('API_KEY_INVALID');
       }
       
-      if (response.status === 400) {
-        throw new Error('INVALID_REQUEST');
-      }
-      
-      throw new Error(error.error.message || 'YouTube API request failed');
+      // Re-throw non-API errors
+      throw error;
     }
-
-    return data as T;
   }
 
   /**

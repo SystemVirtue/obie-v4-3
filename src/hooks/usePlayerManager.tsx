@@ -1,6 +1,7 @@
 import { useToast } from "@/hooks/use-toast";
 import { JukeboxState, PlaylistItem, LogEntry } from "./useJukeboxState";
 import { displayManager, DisplayInfo } from "@/services/displayManager";
+import { youtubeAPIClient } from "@/services/youtube/api/client";
 import * as React from 'react';
 
 export const usePlayerManager = (
@@ -223,7 +224,20 @@ export const usePlayerManager = (
       hasWindow: !!state.playerWindow,
       windowClosed: state.playerWindow?.closed,
       isRunning: state.isPlayerRunning,
+      showMiniPlayer: state.showMiniPlayer,
     });
+
+    // If mini player mode is active, don't initialize a window
+    if (state.showMiniPlayer) {
+      console.log("[InitPlayer] Mini player mode active, skipping window initialization");
+      return;
+    }
+
+    // If display selection dialog is open or should be shown on startup, don't initialize
+    if (state.showDisplaySelectionDialog || state.showDisplaySelectionDialogOnStartup) {
+      console.log("[InitPlayer] Display selection dialog is active, skipping player initialization");
+      return;
+    }
 
     // Add cooldown to prevent rapid initialization attempts
     const lastInitAttempt = localStorage.getItem("lastInitAttempt");
@@ -297,7 +311,24 @@ export const usePlayerManager = (
       let targetDisplay = null;
       let useFullscreen = false;
 
-      if (!displayDetectionFailed) {
+      // Check if user has a default player display setting
+      if (state.userDefaultPlayerDisplay) {
+        console.log("[InitPlayer] Using user default player display:", state.userDefaultPlayerDisplay);
+        const userDisplay = displays.find(d => d.id === state.userDefaultPlayerDisplay!.displayId);
+        if (userDisplay) {
+          targetDisplay = userDisplay;
+          useFullscreen = state.userDefaultPlayerDisplay.fullscreen;
+          console.log(`[InitPlayer] Found user default display: ${userDisplay.name} (${useFullscreen ? "fullscreen" : "windowed"})`);
+          
+          // Save the intended window state for the selected display
+          displayManager.saveDisplayWindowState(userDisplay, useFullscreen);
+        } else {
+          console.warn("[InitPlayer] User default display not found, falling back to auto-detection");
+        }
+      }
+
+      // Auto-detect display if no user preference or preference not found
+      if (!targetDisplay && !displayDetectionFailed) {
         // Prefer secondary display if available and detection succeeded
         const secondaryDisplay = displays.find((display) => !display.isPrimary);
         if (secondaryDisplay) {
@@ -310,13 +341,13 @@ export const usePlayerManager = (
         } else {
           console.log("[InitPlayer] No secondary display found, using primary");
           targetDisplay = displays.find((d) => d.isPrimary) || displays[0];
-          useFullscreen = false; // Windowed mode on primary display
+          useFullscreen = true; // Default to fullscreen on primary display if permissions allow
         }
-      } else {
+      } else if (!targetDisplay) {
         // Use primary display when detection failed
         console.log("[InitPlayer] Using primary display (detection failed)");
         targetDisplay = displays[0];
-        useFullscreen = false; // Windowed mode when detection fails
+        useFullscreen = true; // Default to fullscreen even when detection fails, if permissions allow
       }
 
       if (targetDisplay) {
@@ -372,6 +403,15 @@ export const usePlayerManager = (
           const handlePlayerWindowClose = () => {
             console.log("[InitPlayer] Player window closed by user");
             
+            // Reset player state immediately when window closes
+            setState((prev) => ({
+              ...prev,
+              playerWindow: null,
+              isPlayerRunning: false,
+              showDisplaySelectionDialogOnStartup: true, // Force dialog on next startup
+              showDisplaySelectionDialog: true, // Show dialog immediately
+            }));
+            
             // DON'T save window state when user closes the window
             // Only save state during resize/move events, not on close
             // displayManager.savePlayerWindowState(playerWindow, currentDisplayId);
@@ -392,8 +432,8 @@ export const usePlayerManager = (
           playerWindow.addEventListener('load', () => {
             playerWindow.addEventListener('resize', handleResize);
             
-            // Save initial position after load
-            displayManager.savePlayerWindowState(playerWindow, currentDisplayId);
+            // Removed: Save initial position after load - now handled by saveDisplayWindowState for user defaults
+            // displayManager.savePlayerWindowState(playerWindow, currentDisplayId);
           }, { once: true });
 
           // Set up close event listener
@@ -408,11 +448,6 @@ export const usePlayerManager = (
               console.log("[InitPlayer] Detected player window was closed");
               clearInterval(closeCheckInterval);
               handlePlayerWindowClose();
-              setState((prev) => ({
-                ...prev,
-                playerWindow: null,
-                isPlayerRunning: false,
-              }));
             }
           }, 1000);
 
@@ -561,6 +596,9 @@ export const usePlayerManager = (
     // Clear any previous close state since user is explicitly opening
     localStorage.removeItem("jukeboxPlayerWindowState");
 
+    // Save the intended window state for the selected display
+    displayManager.saveDisplayWindowState(display, fullscreen);
+
     const features = displayManager.generateWindowFeatures(display, fullscreen);
     const playerWindow = window.open("/player.html", "JukeboxPlayer", features);
 
@@ -662,6 +700,11 @@ export const usePlayerManager = (
   };
 
   const handlePlayerToggle = () => {
+    if (state.showMiniPlayer) {
+      console.log("Mini player mode active, cannot toggle window-based player");
+      return;
+    }
+
     if (!state.playerWindow || state.playerWindow.closed) {
       console.log("Player window is closed, reopening...");
       // Clear any previous close state since user is explicitly opening
@@ -672,30 +715,38 @@ export const usePlayerManager = (
     }
 
     if (state.isPlayerRunning && !state.isPlayerPaused) {
-      // Pause player
+      // Pause player with fade out
       if (state.playerWindow && !state.playerWindow.closed) {
-        const command = { action: "pause", timestamp: Date.now() };
+        const command = {
+          action: "fadePause",
+          fadeDuration: 2000, // Fade out over 2 seconds
+          timestamp: Date.now()
+        };
         try {
           localStorage.setItem(
             "jukeboxCommand",
             JSON.stringify(command),
           );
-          addLog("SONG_PLAYED", "Player paused by admin");
+          addLog("SONG_PLAYED", "Player paused by admin (with fade out)");
         } catch (error) {
           console.error("Error sending pause command:", error);
         }
       }
       setState((prev) => ({ ...prev, isPlayerPaused: true }));
     } else if (state.isPlayerRunning && state.isPlayerPaused) {
-      // Resume player
+      // Resume player with fade in
       if (state.playerWindow && !state.playerWindow.closed) {
-        const command = { action: "resume", timestamp: Date.now() };
+        const command = {
+          action: "fadeIn",
+          fadeDuration: 2000, // Fade in over 2 seconds
+          timestamp: Date.now()
+        };
         try {
           localStorage.setItem(
             "jukeboxCommand",
             JSON.stringify(command),
           );
-          addLog("SONG_PLAYED", "Player resumed by admin");
+          addLog("SONG_PLAYED", "Player resumed by admin (with fade in)");
         } catch (error) {
           console.error("Error sending resume command:", error);
         }
@@ -765,15 +816,53 @@ export const usePlayerManager = (
         console.error("[PerformSkip] No player window available for skip");
       }
 
-      // Advance the queue: remove the current song from inMemoryPlaylist
-      let newPlaylist = currentState.inMemoryPlaylist;
-      if (newPlaylist.length > 0) {
-        newPlaylist = newPlaylist.slice(1); // Remove first song
+      // Check if currently playing song is from priority queue
+      const isFromPriority = currentState.priorityQueue.length > 0 &&
+        currentState.priorityQueue[0].title === currentState.currentlyPlaying;
+
+      // If skipping a priority queue song, remove it from the queue
+      let updatedPriorityQueue = currentState.priorityQueue;
+      if (isFromPriority) {
+        console.log('[PerformSkip] Removing skipped priority song from queue');
+        updatedPriorityQueue = currentState.priorityQueue.slice(1);
+
+        // Save updated queue to localStorage
+        try {
+          localStorage.setItem('PRIORITY_QUEUE', JSON.stringify(updatedPriorityQueue));
+          console.log('[PerformSkip] Saved updated priority queue to localStorage');
+        } catch (error) {
+          console.error('[PerformSkip] Failed to save priority queue:', error);
+        }
+      }
+
+      // Advance the queue: check priority queue first, then regular playlist
+      let nextSong = null;
+      let nextVideoIndex = currentState.currentVideoIndex;
+
+      // First check priority queue (after removing skipped song if applicable)
+      if (updatedPriorityQueue.length > 0) {
+        nextSong = updatedPriorityQueue[0];
+        console.log('[PerformSkip] Next song from priority queue:', nextSong.title);
+      }
+      // If no priority queue songs, use regular playlist with currentVideoIndex
+      else if (currentState.inMemoryPlaylist.length > 0) {
+        // Use currentVideoIndex to get the next song (same as playNextSong)
+        nextSong = currentState.inMemoryPlaylist[currentState.currentVideoIndex];
+
+        if (!nextSong) {
+          console.warn('[PerformSkip] No video at current index, resetting to 0');
+          nextVideoIndex = 0;
+          nextSong = currentState.inMemoryPlaylist[0];
+        }
+
+        console.log('[PerformSkip] Next song from regular playlist:', nextSong.title, 'Index:', currentState.currentVideoIndex);
+
+        // Increment currentVideoIndex and wrap around
+        nextVideoIndex = (currentState.currentVideoIndex + 1) % currentState.inMemoryPlaylist.length;
       }
 
       // Play next song if available
-      if (newPlaylist.length > 0) {
-        const nextSong = newPlaylist[0];
+      if (nextSong) {
         setTimeout(() => {
           playSong(
             nextSong.videoId,
@@ -782,68 +871,52 @@ export const usePlayerManager = (
             "SONG_PLAYED",
             0
           );
-        }, 500); // Allow fade-out to complete
+        }, 3000); // Allow fade-out to complete (increased from 2500ms for more buffer)
       } else {
         // No more songs in queue
         addLog("SONG_PLAYED", "Queue ended after skip");
       }
 
-      return { ...currentState, inMemoryPlaylist: newPlaylist, showSkipConfirmation: false };
+      return { ...currentState, priorityQueue: updatedPriorityQueue, currentVideoIndex: nextVideoIndex, showSkipConfirmation: false };
     });
   };
 
   const loadPlaylistVideos = async (playlistId: string) => {
     try {
-      let allVideos: PlaylistItem[] = [];
-      let nextPageToken = '';
-      
-      // Load ALL videos without any limits
-      do {
-        const url = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=${playlistId}&maxResults=50&key=${state.apiKey}${nextPageToken ? `&pageToken=${nextPageToken}` : ''}`;
-        const response = await fetch(url);
-        
-        if (!response.ok) throw new Error('Failed to load playlist');
-        
-        const data = await response.json();
-        const videos: PlaylistItem[] = data.items
-          .filter((item: any) => {
-            // Filter out private/unavailable videos
-            return item.snippet.title !== 'Private video' && 
-                       item.snippet.title !== 'Deleted video' && 
-                       item.snippet.title !== '[Private video]' &&
-                       item.snippet.title !== '[Deleted video]' &&
-                       item.snippet.resourceId?.videoId;
-          })
-          .map((item: any) => ({
-            id: item.id,
-            title: item.snippet.title.replace(/\([^)]*\)/g, '').trim(),
-            channelTitle: item.snippet.channelTitle,
-            videoId: item.snippet.resourceId.videoId
-          }));
-        
-        allVideos = [...allVideos, ...videos];
-        nextPageToken = data.nextPageToken || '';
-        
-        console.log(`[LoadPlaylist] Loaded ${videos.length} videos this batch, total so far: ${allVideos.length}`);
-      } while (nextPageToken);
+      console.log(`[PlayerManager] Loading playlist videos for: ${playlistId}`);
 
-      // Shuffle playlist ONCE after loading
-      const shuffled = shuffleArray(allVideos);
-      setState(prev => ({ 
-        ...prev, 
-        defaultPlaylistVideos: allVideos, // keep original for reference
-        inMemoryPlaylist: [...shuffled], // shuffle for playback
-        currentVideoIndex: 0
+      // Use the cached YouTube API client
+      const allVideos = await youtubeAPIClient.getPlaylist(playlistId, state.apiKey);
+
+      const filteredVideos = allVideos
+        .filter((item: any) => {
+          // Filter out private/unavailable videos
+          return item.title !== 'Private video' &&
+                 item.title !== 'Deleted video' &&
+                 item.title !== '[Private video]' &&
+                 item.title !== '[Deleted video]' &&
+                 item.videoId;
+        })
+        .map((item: any) => ({
+          id: item.id,
+          title: item.title.replace(/\([^)]*\)/g, '').trim(),
+          channelTitle: item.channelTitle,
+          videoId: item.videoId,
+        }));
+
+      console.log(`[PlayerManager] Loaded ${filteredVideos.length} videos from playlist`);
+
+      setState((prev) => ({
+        ...prev,
+        defaultPlaylistVideos: filteredVideos,
+        inMemoryPlaylist: [...filteredVideos],
+        currentVideoIndex: 0,
       }));
-      
-      console.log(`[LoadPlaylist] Loaded ALL ${allVideos.length} videos from playlist (shuffled order)`);
+
+      return filteredVideos;
     } catch (error) {
-      console.error('Error loading playlist:', error);
-      toast({
-        title: "Playlist Error",
-        description: "Failed to load default playlist",
-        variant: "destructive"
-      });
+      console.error('[PlayerManager] Failed to load playlist videos:', error);
+      throw error;
     }
   };
 
@@ -953,7 +1026,10 @@ export const usePlayerManager = (
     // If there's a current song, keep it at the front
     const newPlaylist = currentSong ? [currentSong, ...shuffledRemaining] : shuffledRemaining;
     
-    setState(prev => ({ ...prev, inMemoryPlaylist: newPlaylist }));
+    // After shuffle, current song is at index 0, so next song is at index 1
+    const newCurrentVideoIndex = currentSong ? 1 : 0;
+    
+    setState(prev => ({ ...prev, inMemoryPlaylist: newPlaylist, currentVideoIndex: newCurrentVideoIndex }));
     addLog('SONG_PLAYED', 'Playlist shuffled by admin (excluding current song)');
     toast({
       title: "Playlist Shuffled",

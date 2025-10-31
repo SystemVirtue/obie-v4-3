@@ -1,6 +1,7 @@
-import { useState, useEffect, Dispatch, SetStateAction } from "react";
+import { useState, useEffect, useMemo, Dispatch, SetStateAction } from "react";
 import { SearchMethod } from "@/services/youtube/search";
 import { config } from "@/config";
+import { backgroundService } from "@/services/backgroundService";
 import type {
   JukeboxFullState,
   SearchResult,
@@ -10,6 +11,8 @@ import type {
   UserRequest,
   CreditHistory,
   BackgroundFile,
+  BackgroundQueueItem,
+  BackgroundSettings,
   UserPreferences,
 } from "@/types/jukebox";
 
@@ -35,6 +38,12 @@ const DEFAULT_PLAYLIST_ID = config.youtube.defaultPlaylistId;
 let userPreferencesCache: Partial<UserPreferences> | null = null;
 let cacheTimestamp = 0;
 const CACHE_DURATION = 5000; // 5 seconds
+
+// Clear the user preferences cache (used when localStorage is updated directly)
+const clearUserPreferencesCache = () => {
+  userPreferencesCache = null;
+  cacheTimestamp = 0;
+};
 
 // Load user preferences from localStorage with caching
 const loadUserPreferences = (): Partial<UserPreferences> => {
@@ -111,13 +120,21 @@ const saveUserPreferences = (state: JukeboxFullState) => {
       showMiniPlayer: state.showMiniPlayer,
       testMode: state.testMode,
       videoQuality: state.videoQuality,
+      adaptiveQualityEnabled: state.adaptiveQualityEnabled,
       hideEndCards: state.hideEndCards,
       coinValueA: state.coinValueA,
       coinValueB: state.coinValueB,
       selectedDisplay: state.selectedDisplay,
       useFullscreen: state.useFullscreen,
       autoDetectDisplay: state.autoDetectDisplay,
+      showDisplaySelectionDialogOnStartup: state.showDisplaySelectionDialogOnStartup,
       playerWindowPosition: state.playerWindowPosition,
+      userDefaultPlayerDisplay: state.userDefaultPlayerDisplay,
+      backgrounds: state.backgrounds,
+      backgroundQueue: state.backgroundQueue,
+      backgroundQueueIndex: state.backgroundQueueIndex,
+      backgroundSettings: state.backgroundSettings,
+      bgVisualMode: state.bgVisualMode,
     };
     localStorage.setItem("USER_PREFERENCES", JSON.stringify(preferencesToSave));
     console.log("[UserPreferences] Settings saved to localStorage");
@@ -125,6 +142,8 @@ const saveUserPreferences = (state: JukeboxFullState) => {
     console.error("[UserPreferences] Error saving preferences:", error);
   }
 };
+
+export { clearUserPreferencesCache };
 
 export const useJukeboxState = () => {
   const userPreferences = loadUserPreferences();
@@ -161,7 +180,11 @@ export const useJukeboxState = () => {
     pendingDisplayInfo: null,
     showSkipConfirmation: false,
     showApiKeyTestDialog: false,
+    showDisplaySelectionDialog: false,
     showMiniPlayer: userPreferences.showMiniPlayer ?? false,
+    isImportingPlaylist: false,
+    importProgress: 0,
+    importError: null,
     
     // Player state
     isPlaying: false, // Add missing property
@@ -186,58 +209,40 @@ export const useJukeboxState = () => {
     testMode: userPreferences.testMode ?? false,
     videoQuality: (userPreferences.videoQuality as "auto" | "hd1080" | "hd720" | "large" | "medium" | "small") || "auto",
     hideEndCards: userPreferences.hideEndCards ?? false,
+    adaptiveQualityEnabled: userPreferences.adaptiveQualityEnabled ?? false,
     coinValueA: userPreferences.coinValueA ?? 3,
     coinValueB: userPreferences.coinValueB ?? 1,
     
     // Background configuration
-    backgrounds: [
-      {
-        id: "default",
-        name: "Default",
-        url: "/lovable-uploads/8948bfb8-e172-4535-bd9b-76f9d1c35307.png",
-        type: "image",
-      },
-      {
-        id: "neon1",
-        name: "Neon 1",
-        url: "/backgrounds/Obie_NEON1.png",
-        type: "image",
-      },   
-      {
-        id: "carla",
-        name: "Carla",
-        url: "/backgrounds/Obie - Carla v1.mp4",
-        type: "video",
-      },
-      {
-        id: "neon2",
-        name: "Neon 2",
-        url: "/backgrounds/Obie_NEON2.png",
-        type: "image",
-      },
-      {
-        id: "crest1",
-        name: "Shield Crest 1",
-        url: "/backgrounds/Obie_Shield_Crest_Animation1.mp4",
-        type: "video",
-      },
-      {
-        id: "crest2",
-        name: "Shield Crest 2",
-        url: "/backgrounds/Obie_Shield_Crest_Animation2.mp4",
-        type: "video",
-      },
-    ],
+    backgrounds: userPreferences.backgrounds || [], // Load from localStorage
     selectedBackground: userPreferences.selectedBackground || "neon1",
     cycleBackgrounds: userPreferences.cycleBackgrounds ?? true,
     bounceVideos: userPreferences.bounceVideos ?? false,
     backgroundCycleIndex: 0,
+    backgroundQueue: userPreferences.backgroundQueue || [],
+    backgroundQueueIndex: 0,
+    backgroundSettings: {
+      fitAssetsToScreen: true,
+      dipToBlackFade: true,
+      bounceVideos: false,
+      videoPlaybackSpeed: 1.0,
+      videoLoopRepeat: 1,
+      imageDisplayTime: 5,
+      ...(userPreferences.backgroundSettings || {}),
+    },
+    bgVisualMode: (userPreferences.bgVisualMode as 'random' | 'images-only' | 'videos-only' | 'custom-queue') || 'custom-queue',
+    
+    // Background testing state
+    isTestingBackgroundQueue: false,
+    currentTestIndex: 0,
 
     // Display configuration
     selectedDisplay: userPreferences.selectedDisplay || "",
     useFullscreen: userPreferences.useFullscreen ?? true,
     autoDetectDisplay: userPreferences.autoDetectDisplay ?? true,
+    showDisplaySelectionDialogOnStartup: userPreferences.showDisplaySelectionDialogOnStartup ?? true,
     playerWindowPosition: userPreferences.playerWindowPosition || null,
+    userDefaultPlayerDisplay: userPreferences.userDefaultPlayerDisplay || null,
     
     // History state
     logs: [],
@@ -247,6 +252,8 @@ export const useJukeboxState = () => {
     // Runtime state
     allKeysExhausted: false,
     isAppPaused: false,
+    lastPlayingId: "",
+    playerStatus: null,
   });
 
   // Save preferences whenever relevant state changes (debounced to avoid excessive writes)
@@ -265,6 +272,9 @@ export const useJukeboxState = () => {
     state.selectedBackground,
     state.cycleBackgrounds,
     state.bounceVideos,
+    state.backgroundQueue,
+    state.backgroundQueueIndex,
+    state.backgroundSettings,
     state.maxSongLength,
     state.showMiniPlayer,
     state.testMode,
@@ -275,7 +285,10 @@ export const useJukeboxState = () => {
     state.selectedDisplay,
     state.useFullscreen,
     state.autoDetectDisplay,
+    state.showDisplaySelectionDialogOnStartup,
     state.playerWindowPosition,
+    state.userDefaultPlayerDisplay,
+    state.bgVisualMode,
   ]);
 
   // Save current video index whenever it changes
@@ -356,33 +369,106 @@ export const useJukeboxState = () => {
     }));
   };
 
-  const getUpcomingTitles = () => {
+  const handleAddToBackgroundQueue = (assetId: string) => {
+    // Find the asset in backgrounds or default assets
+    const defaultAssets = [
+      { id: 'none-black', name: 'NONE (BLACK)', type: 'default' as const },
+      { id: 'now-playing-thumbnail', name: 'Now Playing Thumbnail', type: 'default' as const },
+      { id: 'random-thumbnails', name: 'Random Thumbnail Tiles', type: 'default' as const },
+    ];
+
+    const asset = [...defaultAssets, ...state.backgrounds].find(a => a.id === assetId);
+    if (!asset) return;
+
+    const queueItem = {
+      id: Date.now().toString(),
+      assetId: asset.id,
+      name: asset.name,
+      type: asset.type,
+      url: 'url' in asset ? asset.url : undefined,
+    };
+
+    setState((prev) => ({
+      ...prev,
+      backgroundQueue: [...prev.backgroundQueue, queueItem],
+    }));
+  };
+
+  const handleRemoveFromBackgroundQueue = (queueId: string) => {
+    setState((prev) => ({
+      ...prev,
+      backgroundQueue: prev.backgroundQueue.filter(item => item.id !== queueId),
+    }));
+  };
+
+  const handleReorderBackgroundQueue = (fromIndex: number, toIndex: number) => {
+    setState((prev) => {
+      const newQueue = [...prev.backgroundQueue];
+      const [removed] = newQueue.splice(fromIndex, 1);
+      newQueue.splice(toIndex, 0, removed);
+      return {
+        ...prev,
+        backgroundQueue: newQueue,
+      };
+    });
+  };
+
+  const handleUpdateBackgroundQueueItem = (queueId: string, updates: Partial<BackgroundQueueItem>) => {
+    setState((prev) => ({
+      ...prev,
+      backgroundQueue: prev.backgroundQueue.map(item =>
+        item.id === queueId ? { ...item, ...updates } : item
+      ),
+    }));
+  };
+
+  const handleTestBackgroundQueue = () => {
+    // This will be handled by the BackgroundAssetsPanel component
+    // The actual testing logic is implemented there
+    console.log('[BackgroundQueue] Test mode toggled');
+  };
+
+  const handleBackgroundSettingsChange = (settings: BackgroundSettings) => {
+    setState((prev) => ({
+      ...prev,
+      backgroundSettings: settings,
+    }));
+  };
+
+  const getUpcomingTitles = useMemo(() => {
     const upcoming = [];
 
-    // Add priority queue songs first (will be displayed in white)
-    for (let i = 0; i < state.priorityQueue.length; i++) {
-      upcoming.push(`PRIORITY:${state.priorityQueue[i].title}`);
+    // First: Add ALL songs currently in PRIORITY_QUEUE (excluding now_playing if applicable)
+    for (const song of state.priorityQueue) {
+      // Exclude if this is the currently playing song (though typically priority songs are removed after playing)
+      if (song.title !== state.currentlyPlaying) {
+        upcoming.push(`PRIORITY:${song.title}`);
+      }
     }
 
-    // Fill remaining slots with in-memory playlist songs starting from currentVideoIndex
-    // (showing the actual upcoming songs)
+    // Second: Add upcoming songs from the playlist (same logic as getCurrentPlaylistForDisplay)
+    // Start from currentVideoIndex but skip the currently playing song
     if (state.inMemoryPlaylist.length > 0) {
-      const startIndex = state.currentVideoIndex + 0; // Start from current position
-      const remainingSlots = 4 - upcoming.length;
+      const totalSongs = state.inMemoryPlaylist.length;
+      let addedCount = 0;
+      const maxUpcoming = 5; // Limit to 5 upcoming songs for the ticker
 
-      for (
-        let i = startIndex;
-        i < Math.min(startIndex + remainingSlots, state.inMemoryPlaylist.length);
-        i++
-      ) {
-        if (i >= 0 && i < state.inMemoryPlaylist.length) {
-          upcoming.push(state.inMemoryPlaylist[i].title);
+      for (let i = 0; i < totalSongs && addedCount < maxUpcoming; i++) {
+        const songIndex = (state.currentVideoIndex + i) % totalSongs;
+        const song = state.inMemoryPlaylist[songIndex];
+
+        // Skip the currently playing song
+        if (song.title === state.currentlyPlaying) {
+          continue;
         }
+
+        upcoming.push(song.title);
+        addedCount++;
       }
     }
 
     return upcoming;
-  };
+  }, [state.priorityQueue, state.inMemoryPlaylist, state.currentVideoIndex, state.currentlyPlaying]); // Only update when these change
 
   const isCurrentSongUserRequest = () => {
     return state.userRequests.some(
@@ -393,37 +479,80 @@ export const useJukeboxState = () => {
   const getCurrentPlaylistForDisplay = () => {
     const playlist = [];
 
-    // Add currently playing song at top
+    // 1. Currently Playing Section
     if (state.currentlyPlaying && state.currentlyPlaying !== "Loading...") {
-      playlist.push({
-        id: "now-playing",
-        title: state.currentlyPlaying,
-        channelTitle: "Now Playing",
-        videoId: "current",
-        isNowPlaying: true,
-      });
+      // Check if currently playing is from priority queue
+      const isFromPriority = state.priorityQueue.some(req => req.title === state.currentlyPlaying);
+
+      if (!isFromPriority && state.inMemoryPlaylist.length > 0) {
+        // The currently playing song is the one that was at currentVideoIndex before it got incremented
+        // Since currentVideoIndex now points to the next song, we need to find the previous index
+        const currentSongIndex = state.currentVideoIndex === 0
+          ? state.inMemoryPlaylist.length - 1
+          : state.currentVideoIndex - 1;
+
+        const currentSong = state.inMemoryPlaylist[currentSongIndex];
+        if (currentSong && currentSong.title === state.currentlyPlaying) {
+          playlist.push({
+            ...currentSong,
+            isNowPlaying: true,
+            displayOrder: 0
+          });
+        }
+      }
     }
 
-    // Add priority queue
+    // 2. Priority Queue (Requests) Section
     playlist.push(
-      ...state.priorityQueue.map((req) => ({
+      ...state.priorityQueue.map((req, index) => ({
         ...req,
         isUserRequest: true,
-      })),
+        displayOrder: index + 1
+      }))
     );
 
-    // Add next songs from in-memory playlist, but skip if it's the currently playing song
-    playlist.push(
-      ...state.inMemoryPlaylist
-        .filter((song) => song.title !== state.currentlyPlaying)
-        .map((song) => ({
+    // 3. Playlist Section - Circular display
+    if (state.inMemoryPlaylist.length > 0) {
+      const totalSongs = state.inMemoryPlaylist.length;
+
+      // First: Songs from currentVideoIndex onwards (upcoming)
+      for (let i = 0; i < totalSongs; i++) {
+        const songIndex = (state.currentVideoIndex + i) % totalSongs;
+        const song = state.inMemoryPlaylist[songIndex];
+
+        // Skip the currently playing song (already shown above)
+        if (song.title === state.currentlyPlaying) {
+          continue;
+        }
+
+        playlist.push({
           ...song,
           isUserRequest: false,
-        })),
-    );
+          isAlreadyPlayed: false, // All remaining songs are upcoming since we start from currentVideoIndex
+          displayOrder: state.priorityQueue.length + i + 1
+        });
+      }
+    }
 
     return playlist;
   };
+  // Load backgrounds asynchronously on mount
+  useEffect(() => {
+    const loadBackgrounds = async () => {
+      try {
+        const backgroundAssets = await backgroundService.loadBackgroundAssets();
+        setState((prev) => ({
+          ...prev,
+          backgrounds: backgroundAssets,
+        }));
+      } catch (error) {
+        console.error('Failed to load background assets:', error);
+        // Keep empty backgrounds array as fallback
+      }
+    };
+
+    loadBackgrounds();
+  }, []); // Only run once on mount
 
   return {
     state,
@@ -432,8 +561,14 @@ export const useJukeboxState = () => {
     addUserRequest,
     addCreditHistory,
     handleBackgroundUpload,
-    getUpcomingTitles,
+    handleAddToBackgroundQueue,
+    handleRemoveFromBackgroundQueue,
+    handleReorderBackgroundQueue,
+    handleUpdateBackgroundQueueItem,
+    handleTestBackgroundQueue,
+    handleBackgroundSettingsChange,
+    upcomingTitles: getUpcomingTitles,
     isCurrentSongUserRequest,
     getCurrentPlaylistForDisplay,
   };
-};
+}

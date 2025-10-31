@@ -1,4 +1,4 @@
-import type { DisplayInfo } from "../../types/jukebox";
+import type { DisplayInfo } from "@/types/jukebox";
 
 interface DisplayPreference {
   preferExternal: boolean;
@@ -170,11 +170,11 @@ class DisplayManager {
     if (fullscreen) {
       return `width=${display.width},height=${display.height},left=${display.left},top=${display.top},scrollbars=no,menubar=no,toolbar=no,location=no,status=no,resizable=no`;
     } else {
-      // Use 80% of display size for windowed mode
-      const width = Math.floor(display.width * 0.8);
-      const height = Math.floor(display.height * 0.8);
-      const left = display.left + Math.floor((display.width - width) / 2);
-      const top = display.top + Math.floor((display.height - height) / 2);
+      // Use 100% of display size for windowed mode (matches user requirement)
+      const width = display.width;
+      const height = display.height;
+      const left = display.left;
+      const top = display.top;
 
       return `width=${width},height=${height},left=${left},top=${top},scrollbars=no,menubar=no,toolbar=no,location=no,status=no,resizable=yes`;
     }
@@ -376,6 +376,42 @@ class DisplayManager {
     }
   }
 
+  // Save intended window state for a display (used when user selects default display)
+  saveDisplayWindowState(display: DisplayInfo, fullscreen: boolean): void {
+    try {
+      let width: number;
+      let height: number;
+      let x: number;
+      let y: number;
+
+      if (fullscreen) {
+        width = display.width;
+        height = display.height;
+        x = display.left;
+        y = display.top;
+      } else {
+        // Use 100% of display size for windowed mode (matches user requirement)
+        width = display.width;
+        height = display.height;
+        x = display.left;
+        y = display.top;
+      }
+
+      const state: PlayerWindowState = {
+        position: { x, y },
+        size: { width, height },
+        displayId: display.id,
+        isFullscreen: fullscreen,
+        lastUpdated: new Date().toISOString()
+      };
+      
+      localStorage.setItem('PLAYER_WINDOW_STATE', JSON.stringify(state));
+      console.log('[DisplayManager] Saved display-based window state:', state);
+    } catch (error) {
+      console.error('[DisplayManager] Failed to save display-based window state:', error);
+    }
+  }
+
   // Get saved player window position and size
   getPlayerWindowState(): PlayerWindowState | null {
     try {
@@ -407,6 +443,89 @@ class DisplayManager {
       console.log('[DisplayManager] Cleared window state');
     } catch (error) {
       console.error('[DisplayManager] Failed to clear window state:', error);
+    }
+  }
+
+  // Identify displays by showing display IDs on each screen
+  async identifyDisplays(): Promise<void> {
+    try {
+      const displays = await this.getDisplays();
+      const identifyWindows: Window[] = [];
+
+      // Create identification windows on each display
+      for (let i = 0; i < displays.length; i++) {
+        const display = displays[i];
+
+        // Calculate window size: screenwidth/3 x screenheight/3
+        const windowWidth = Math.floor(display.width / 3);
+        const windowHeight = Math.floor(display.height / 3);
+
+        // Calculate window position to center on the display
+        const centerX = display.left + (display.width / 2) - (windowWidth / 2);
+        const centerY = display.top + (display.height / 2) - (windowHeight / 2);
+
+        const features = `width=${windowWidth},height=${windowHeight},left=${centerX},top=${centerY},resizable=no,scrollbars=no,status=no,toolbar=no,menubar=no`;
+
+        const identifyWindow = window.open(
+          'about:blank',
+          `display-identify-${i}`,
+          features
+        );
+
+        if (identifyWindow) {
+          identifyWindows.push(identifyWindow);
+
+          // Write identification content with large font
+          identifyWindow.document.write(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <title>Display ${i + 1}</title>
+              <style>
+                body {
+                  margin: 0;
+                  padding: 0;
+                  background: #000;
+                  color: #fff;
+                  font-family: Arial, sans-serif;
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  height: 100vh;
+                  text-align: center;
+                  font-size: 66px;
+                  font-weight: bold;
+                }
+              </style>
+            </head>
+            <body>
+              #${i + 1}
+            </body>
+            </html>
+          `);
+
+          identifyWindow.document.close();
+        }
+      }
+
+      // Return a promise that resolves when the identification is complete
+      return new Promise((resolve) => {
+        const closeWindows = () => {
+          identifyWindows.forEach(win => {
+            if (win && !win.closed) {
+              win.close();
+            }
+          });
+          resolve();
+        };
+
+        // Close windows after 3 seconds
+        setTimeout(closeWindows, 3000);
+      });
+
+    } catch (error) {
+      console.error('[DisplayManager] Failed to identify displays:', error);
+      throw error;
     }
   }
 }

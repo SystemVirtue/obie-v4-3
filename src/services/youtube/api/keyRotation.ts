@@ -178,11 +178,47 @@ export class APIKeyRotationService {
   }
 
   /**
-   * Clear rotation history
+   * Validate all available keys and return only valid ones with quota remaining
    */
-  clearHistory(): void {
-    this.rotationHistory = [];
-    console.log('[KeyRotation] History cleared');
+  async getValidKeysWithQuota(customKey?: string): Promise<{ key: string; option: string; quotaPercentage: number }[]> {
+    const availableKeys = this.getAvailableKeys(customKey, true);
+    const validKeys: { key: string; option: string; quotaPercentage: number }[] = [];
+
+    console.log(`[KeyRotation] Validating ${availableKeys.length} API keys...`);
+
+    // Check each key's validity and quota status
+    for (const key of availableKeys) {
+      try {
+        // First check if key is valid by testing it
+        const { testApiKey } = await import('@/utils/apiKeyTester');
+        const testResult = await testApiKey(key);
+
+        if (testResult.isValid && !testResult.quotaUsed) {
+          // Key is valid and not quota-exhausted, now check quota percentage
+          const quotaStatus = await youtubeQuotaService.checkQuotaUsage(key);
+
+          // Only include keys with less than 95% quota used (leave some buffer)
+          if (quotaStatus.percentage < 95) {
+            const option = this.getOptionFromKey(key, customKey);
+            validKeys.push({
+              key,
+              option,
+              quotaPercentage: quotaStatus.percentage
+            });
+            console.log(`[KeyRotation] ✓ Valid key ${option}: ${quotaStatus.percentage.toFixed(1)}% quota used`);
+          } else {
+            console.log(`[KeyRotation] ✗ Key ${this.getOptionFromKey(key, customKey)} quota too high: ${quotaStatus.percentage.toFixed(1)}%`);
+          }
+        } else {
+          console.log(`[KeyRotation] ✗ Invalid or quota-exhausted key ${this.getOptionFromKey(key, customKey)}: ${testResult.message}`);
+        }
+      } catch (error) {
+        console.error(`[KeyRotation] Error validating key ${this.getOptionFromKey(key, customKey)}:`, error);
+      }
+    }
+
+    console.log(`[KeyRotation] Found ${validKeys.length} valid keys with available quota`);
+    return validKeys;
   }
 }
 

@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 
 /**
@@ -31,6 +32,24 @@ interface UpcomingQueueProps {
 }
 
 export const UpcomingQueue = ({ upcomingTitles, testMode = false }: UpcomingQueueProps) => {
+  const marqueeRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (marqueeRef.current) {
+      const textWidth = marqueeRef.current.scrollWidth;
+      const containerWidth = marqueeRef.current.parentElement?.clientWidth || 0;
+      
+      // Calculate animation duration based on text length
+      // Base duration of 10 seconds for short text, scaling up to 30 seconds for long text
+      const baseDuration = 10;
+      const maxDuration = 30;
+      const duration = Math.min(maxDuration, baseDuration + (textWidth / containerWidth) * 10);
+      
+      // Apply the dynamic duration
+      marqueeRef.current.style.animationDuration = `${duration}s`;
+    }
+  }, [upcomingTitles]);
+
   return (
     <>
       {/* Test Mode Indicator - positioned above Coming Up ticker */}
@@ -49,6 +68,7 @@ export const UpcomingQueue = ({ upcomingTitles, testMode = false }: UpcomingQueu
       {/* Coming Up Ticker - Responsive bottom ticker */}
       <div className="absolute bottom-0 left-0 right-0 bg-black/80 text-amber-200 py-1 sm:py-2 overflow-hidden">
         <div
+          ref={marqueeRef}
           className="whitespace-nowrap animate-marquee-fast"
           key={`upcoming-${upcomingTitles.length}-${upcomingTitles[0] || ""}`}
         >

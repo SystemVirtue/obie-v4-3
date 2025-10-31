@@ -1,11 +1,22 @@
 import React, { useRef, useState, useEffect } from "react";
 import { youtubeQuotaService, QuotaUsage } from "@/services/youtube/api";
 import { testApiKey, ApiKeyTestResult } from "@/utils/apiKeyTester";
+import { apiKeyRotation } from "@/services/youtube/api/keyRotation";
 import { displayManager } from "@/services/displayManager";
-import type { DisplayInfo } from "../types/jukebox";
+import type { DisplayInfo, PlaylistItem } from "../types/jukebox";
 import { SearchMethod } from "@/services/youtube/search";
 import { AdminConsoleHealthCheck } from "@/components/AdminConsoleHealthCheck";
 import { PlaylistManager } from "@/components/PlaylistManager";
+import { SettingsPanel } from "@/components/SettingsPanel";
+import { PlayerControlsPanel } from "@/components/PlayerControlsPanel";
+import { VideoSettingsPanel } from "@/components/VideoSettingsPanel";
+import { ApiManagementPanel } from "@/components/ApiManagementPanel";
+import { LogsPanel } from "@/components/LogsPanel";
+import { SettingsManagementPanel } from "@/components/SettingsManagementPanel";
+import { DisplayButtonGrid } from "@/components/DisplayButtonGrid";
+import { BackgroundAssetsPanel } from "@/components/BackgroundAssetsPanel";
+import { BackgroundSettingsPanel } from "@/components/BackgroundSettingsPanel";
+import { BackgroundAssetsErrorBoundary } from "@/components/BackgroundAssetsErrorBoundary";
 import {
   Dialog,
   DialogContent,
@@ -138,6 +149,16 @@ interface AdminConsoleProps {
   onCycleBackgroundsChange: (cycle: boolean) => void;
   bounceVideos: boolean;
   onBounceVideosChange: (bounce: boolean) => void;
+  backgroundQueue: BackgroundQueueItem[];
+  onAddToBackgroundQueue: (assetId: string) => void;
+  onRemoveFromBackgroundQueue: (queueId: string) => void;
+  onReorderBackgroundQueue: (fromIndex: number, toIndex: number) => void;
+  onUpdateBackgroundQueueItem?: (queueId: string, updates: Partial<BackgroundQueueItem>) => void;
+  onTestBackgroundQueue?: () => void;
+  isTestingBackgroundQueue?: boolean;
+  currentTestIndex?: number;
+  backgroundSettings: BackgroundSettings;
+  onBackgroundSettingsChange: (settings: BackgroundSettings) => void;
   onBackgroundUpload: (event: React.ChangeEvent<HTMLInputElement>) => void;
   onAddLog: (
     type: LogEntry["type"],
@@ -157,6 +178,7 @@ interface AdminConsoleProps {
   ) => void;
   playerWindow: Window | null;
   isPlayerRunning: boolean;
+  isPlayerPaused: boolean;
   onPlayerToggle: () => void;
   onSkipSong: () => void;
   onInitializePlayer: () => void;
@@ -164,8 +186,8 @@ interface AdminConsoleProps {
   onMaxSongLengthChange: (minutes: number) => void;
   defaultPlaylist: string;
   onDefaultPlaylistChange: (playlistId: string) => void;
-  currentPlaylistVideos: any[];
-  onPlaylistReorder?: (newPlaylist: any[]) => void;
+  currentPlaylistVideos: PlaylistItem[];
+  onPlaylistReorder?: (newPlaylist: PlaylistItem[]) => void;
   onPlaylistShuffle?: () => void;
   currentlyPlaying: string;
   priorityQueue: QueuedRequest[];
@@ -181,12 +203,25 @@ interface AdminConsoleProps {
   onVideoQualityChange: (quality: "auto" | "hd1080" | "hd720" | "large" | "medium" | "small") => void;
   hideEndCards: boolean;
   onHideEndCardsChange: (hide: boolean) => void;
+  adaptiveQualityEnabled: boolean;
+  onAdaptiveQualityEnabledChange: (enabled: boolean) => void;
   selectedDisplay: string;
   onSelectedDisplayChange: (display: string) => void;
   useFullscreen: boolean;
   onUseFullscreenChange: (fullscreen: boolean) => void;
   autoDetectDisplay: boolean;
   onAutoDetectDisplayChange: (autoDetect: boolean) => void;
+  showDisplaySelectionDialogOnStartup: boolean;
+  onShowDisplaySelectionDialogOnStartupChange: (show: boolean) => void;
+  backgroundQueue: BackgroundQueueItem[];
+  onAddToBackgroundQueue: (assetId: string) => void;
+  onRemoveFromBackgroundQueue: (queueId: string) => void;
+  onReorderBackgroundQueue: (fromIndex: number, toIndex: number) => void;
+  backgroundSettings: BackgroundSettings;
+  onBackgroundSettingsChange: (settings: BackgroundSettings) => void;
+  bgVisualMode: "random" | "images-only" | "videos-only" | "custom-queue";
+  onBgVisualModeChange: (mode: "random" | "images-only" | "videos-only" | "custom-queue") => void;
+  isImportingPlaylist?: boolean;
 }
 
 const AVAILABLE_PLAYLISTS: PlaylistInfo[] = [
@@ -230,12 +265,25 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
   onCycleBackgroundsChange,
   bounceVideos,
   onBounceVideosChange,
+  backgroundQueue,
+  onAddToBackgroundQueue,
+  onRemoveFromBackgroundQueue,
+  onReorderBackgroundQueue,
+  onUpdateBackgroundQueueItem,
+  onTestBackgroundQueue,
+  isTestingBackgroundQueue,
+  currentTestIndex,
+  backgroundSettings,
+  onBackgroundSettingsChange,
+  bgVisualMode,
+  onBgVisualModeChange,
   onBackgroundUpload,
   onAddLog,
   onAddUserRequest,
   onAddCreditHistory,
   playerWindow,
   isPlayerRunning,
+  isPlayerPaused,
   onPlayerToggle,
   onSkipSong,
   onInitializePlayer,
@@ -260,12 +308,17 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
   onVideoQualityChange,
   hideEndCards,
   onHideEndCardsChange,
+  adaptiveQualityEnabled,
+  onAdaptiveQualityEnabledChange,
   selectedDisplay,
   onSelectedDisplayChange,
   useFullscreen,
   onUseFullscreenChange,
   autoDetectDisplay,
   onAutoDetectDisplayChange,
+  showDisplaySelectionDialogOnStartup,
+  onShowDisplaySelectionDialogOnStartupChange,
+  isImportingPlaylist,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showPlaylistDialog, setShowPlaylistDialog] = useState(false);
@@ -280,6 +333,29 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
     useState<ApiKeyTestResult | null>(null);
   const [testingApiKey, setTestingApiKey] = useState(false);
   const [hasCheckedQuota, setHasCheckedQuota] = useState(false);
+  const [validApiKeys, setValidApiKeys] = useState<Array<{ key: string; option: string; quotaPercentage: number }>>([]);
+  const [validatingKeys, setValidatingKeys] = useState(false);
+
+  // Load valid API keys from localStorage on component mount
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('VALID_API_KEYS');
+      if (stored) {
+        const parsedKeys = JSON.parse(stored);
+        setValidApiKeys(parsedKeys);
+      }
+    } catch (error) {
+      console.error('Error loading valid API keys from localStorage:', error);
+    }
+  }, []);
+
+  // Auto-validate keys when admin panel opens (only once per session)
+  useEffect(() => {
+    if (isOpen && validApiKeys.length === 0 && !validatingKeys) {
+      console.log('[AdminConsole] Auto-validating API keys on panel open...');
+      handleValidateAllKeys();
+    }
+  }, [isOpen]); // Only depend on isOpen to avoid infinite loops
 
   // API Key mappings
   const API_KEY_OPTIONS = {
@@ -400,6 +476,79 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
       setTestingApiKey(false);
     }
   };
+
+  const handleValidateAllKeys = async () => {
+    if (validatingKeys) {
+      console.log("Key validation already in progress, ignoring request");
+      return;
+    }
+
+    setValidatingKeys(true);
+
+    try {
+      console.log("[AdminConsole] Starting validation of all API keys...");
+      const validKeys = await apiKeyRotation.getValidKeysWithQuota(customApiKey);
+      setValidApiKeys(validKeys);
+
+      // Store valid keys in localStorage for persistence
+      localStorage.setItem('VALID_API_KEYS', JSON.stringify(validKeys));
+
+      console.log(`[AdminConsole] Found ${validKeys.length} valid API keys with available quota`);
+    } catch (error) {
+      console.error("[AdminConsole] Error validating API keys:", error);
+    } finally {
+      setValidatingKeys(false);
+    }
+  };
+
+  const handleSaveConfiguration = () => {
+    // Save USER_PREFERENCES
+    const userPrefs = {
+      mode,
+      credits,
+      defaultPlaylist,
+      apiKey,
+      selectedApiKeyOption,
+      customApiKey,
+      autoRotateApiKeys,
+      searchMethod,
+      selectedCoinAcceptor,
+      selectedBackground,
+      cycleBackgrounds,
+      bounceVideos,
+      maxSongLength,
+      showMiniPlayer,
+      testMode,
+      videoQuality,
+      hideEndCards,
+      coinValueA,
+      coinValueB,
+      selectedDisplay,
+      useFullscreen,
+      autoDetectDisplay,
+      playerWindowPosition: null, // Will be saved separately
+    };
+    localStorage.setItem('USER_PREFERENCES', JSON.stringify(userPrefs));
+
+    // Save ACTIVE_PLAYLIST (current in-memory playlist)
+    if (currentPlaylistVideos && currentPlaylistVideos.length > 0) {
+      localStorage.setItem('ACTIVE_QUEUE', JSON.stringify(currentPlaylistVideos));
+    }
+
+    // Save CURRENT_QUEUE_INDEX
+    localStorage.setItem('current_video_index', '0'); // Reset to start on save
+
+    // Save PRIORITY_QUEUE
+    if (priorityQueue && priorityQueue.length > 0) {
+      localStorage.setItem('PRIORITY_QUEUE', JSON.stringify(priorityQueue));
+    }
+
+    // Save ACTIVE_PLAYLIST_DATA (original loaded playlist)
+    localStorage.setItem('active_playlist_data', JSON.stringify(currentPlaylistVideos));
+
+    console.log('[AdminConsole] Configuration saved automatically on close');
+  };
+
   const [playlistTitles, setPlaylistTitles] = useState<{
     [key: string]: string;
   }>({});
@@ -505,9 +654,17 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
     return priorityQueue.length + defaultPlaylistLength;
   };
 
+  const handleDialogOpenChange = (open: boolean) => {
+    if (!open) {
+      // Dialog is closing, save configuration
+      handleSaveConfiguration();
+    }
+    onClose();
+  };
+
   return (
     <>
-      <Dialog open={isOpen} onOpenChange={onClose}>
+      <Dialog open={isOpen} onOpenChange={handleDialogOpenChange}>
         <DialogContent className="bg-gradient-to-b from-slate-100 to-slate-200 border-slate-600 max-w-5xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-xl text-slate-900">
@@ -541,604 +698,76 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
               </div>
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">
-                Play Mode
-              </label>
-              <Select value={mode} onValueChange={onModeChange}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="FREEPLAY">Free Play</SelectItem>
-                  <SelectItem value="PAID">Credit Mode</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            <SettingsPanel
+              mode={mode}
+              onModeChange={onModeChange}
+              credits={credits}
+              onCreditsChange={onCreditsChange}
+              selectedCoinAcceptor={selectedCoinAcceptor}
+              onCoinAcceptorChange={onCoinAcceptorChange}
+              coinValueA={coinValueA}
+              onCoinValueAChange={onCoinValueAChange}
+              coinValueB={coinValueB}
+              onCoinValueBChange={onCoinValueBChange}
+              defaultPlaylist={defaultPlaylist}
+              onDefaultPlaylistChange={onDefaultPlaylistChange}
+              currentPlaylistVideos={currentPlaylistVideos}
+              onPlaylistShuffle={onPlaylistShuffle}
+              onAddLog={onAddLog}
+              onAddCreditHistory={onAddCreditHistory}
+              playlistTitles={playlistTitles}
+              setShowPlaylistDialog={setShowPlaylistDialog}
+              isImportingPlaylist={isImportingPlaylist}
+            />
 
-            {/* Coin Acceptor Configuration */}
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">
-                Coin Acceptor Device
-              </label>
-              <Select
-                value={selectedCoinAcceptor}
-                onValueChange={onCoinAcceptorChange}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select device..." />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No Device</SelectItem>
-                  <SelectItem value="usbserial-1420">
-                    USB Serial Device (usbserial-1420)
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+            <PlayerControlsPanel
+              playerWindow={playerWindow}
+              isPlayerRunning={isPlayerRunning}
+              isPlayerPaused={isPlayerPaused}
+              onPlayerToggle={onPlayerToggle}
+              onSkipSong={onSkipSong}
+              onInitializePlayer={onInitializePlayer}
+              selectedDisplay={selectedDisplay}
+              onSelectedDisplayChange={onSelectedDisplayChange}
+              useFullscreen={useFullscreen}
+              onUseFullscreenChange={onUseFullscreenChange}
+              autoDetectDisplay={autoDetectDisplay}
+              onAutoDetectDisplayChange={onAutoDetectDisplayChange}
+            />
 
-              {selectedCoinAcceptor && selectedCoinAcceptor !== "none" && (
-                <div className="mt-4 bg-blue-50 border border-blue-200 rounded-lg p-4">
-                  <div className="flex items-center gap-2 mb-3">
-                    <Coins className="w-5 h-5 text-blue-600" />
-                    <label className="text-sm font-medium text-blue-800">
-                      Coin Values Configuration
-                    </label>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-medium text-blue-700 mb-1">
-                        "a" character adds:
-                      </label>
-                      <Input
-                        type="number"
-                        min="1"
-                        max="10"
-                        value={coinValueA ?? 3}
-                        onChange={(e) =>
-                          onCoinValueAChange(parseInt(e.target.value) || 1)
-                        }
-                        className="w-full"
-                      />
-                      <span className="text-xs text-blue-600">credit(s)</span>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-blue-700 mb-1">
-                        "b" character adds:
-                      </label>
-                      <Input
-                        type="number"
-                        min="1"
-                        max="10"
-                        value={coinValueB ?? 1}
-                        onChange={(e) =>
-                          onCoinValueBChange(parseInt(e.target.value) || 3)
-                        }
-                        className="w-full"
-                      />
-                      <span className="text-xs text-blue-600">credit(s)</span>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
+            <VideoSettingsPanel
+              showMiniPlayer={showMiniPlayer}
+              onShowMiniPlayerChange={onShowMiniPlayerChange}
+              maxSongLength={maxSongLength}
+              onMaxSongLengthChange={onMaxSongLengthChange}
+              videoQuality={videoQuality}
+              onVideoQualityChange={onVideoQualityChange}
+              hideEndCards={hideEndCards}
+              onHideEndCardsChange={onHideEndCardsChange}
+              adaptiveQualityEnabled={adaptiveQualityEnabled}
+              onAdaptiveQualityEnabledChange={onAdaptiveQualityEnabledChange}
+            />
 
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">
-                Default Playlist
-              </label>
-              <Select
-                value={defaultPlaylist}
-                onValueChange={onDefaultPlaylistChange}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {AVAILABLE_PLAYLISTS.map((playlist) => (
-                    <SelectItem key={playlist.id} value={playlist.id}>
-                      {playlistTitles[playlist.id] || playlist.title}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <div className="flex gap-2 mt-2">
-                <Button
-                  onClick={() => setShowPlaylistDialog(true)}
-                  className="bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-2"
-                  size="sm"
-                >
-                  <List className="w-4 h-4" />
-                  Show Queue (
-                  {
-                    currentPlaylistVideos.filter(
-                      (v) => !v.isUserRequest && !v.isNowPlaying,
-                    ).length
-                  }{" "}
-                  songs)
-                </Button>
-                <Button
-                  onClick={onPlaylistShuffle}
-                  className="bg-purple-600 hover:bg-purple-700 text-white flex items-center gap-2"
-                  size="sm"
-                >
-                  <Shuffle className="w-4 h-4" />
-                  Shuffle
-                </Button>
-              </div>
-            </div>
-
-            {mode === "PAID" && (
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">
-                  Credit Balance: {credits}
-                </label>
-                <div className="flex gap-2 mb-4">
-                  <Button
-                    size="sm"
-                    onClick={() => {
-                      onCreditsChange(credits + 1);
-                      onAddLog(
-                        "CREDIT_ADDED",
-                        "ADMIN CREDIT (+1)",
-                        undefined,
-                        1,
-                      );
-                      onAddCreditHistory(1, "ADDED", "ADMIN CREDIT (+1)");
-                    }}
-                    className="bg-green-600 hover:bg-green-700"
-                  >
-                    +1
-                  </Button>
-                  <Button
-                    size="sm"
-                    onClick={() => {
-                      onCreditsChange(credits + 3);
-                      onAddLog(
-                        "CREDIT_ADDED",
-                        "ADMIN CREDIT (+3)",
-                        undefined,
-                        3,
-                      );
-                      onAddCreditHistory(3, "ADDED", "ADMIN CREDIT (+3)");
-                    }}
-                    className="bg-green-600 hover:bg-green-700"
-                  >
-                    +3
-                  </Button>
-                  <Button
-                    size="sm"
-                    onClick={() => {
-                      onCreditsChange(credits + 5);
-                      onAddLog(
-                        "CREDIT_ADDED",
-                        "ADMIN CREDIT (+5)",
-                        undefined,
-                        5,
-                      );
-                      onAddCreditHistory(5, "ADDED", "ADMIN CREDIT (+5)");
-                    }}
-                    className="bg-green-600 hover:bg-green-700"
-                  >
-                    +5
-                  </Button>
-                  <Button
-                    size="sm"
-                    onClick={() => {
-                      onAddLog(
-                        "CREDIT_REMOVED",
-                        `ADMIN CREDIT CLEAR (was ${credits})`,
-                        undefined,
-                        -credits,
-                      );
-                      onAddCreditHistory(
-                        credits,
-                        "REMOVED",
-                        `ADMIN CREDIT CLEAR (was ${credits})`,
-                      );
-                      onCreditsChange(0);
-                    }}
-                    variant="destructive"
-                  >
-                    Clear(0)
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">
-                Player Controls
-              </label>
-
-              {/* Player Status Indicator */}
-              <div className="mb-3 p-2 bg-slate-100 rounded text-sm">
-                <div className="flex items-center gap-2">
-                  <div
-                    className={`w-2 h-2 rounded-full ${
-                      playerWindow && !playerWindow.closed
-                        ? "bg-green-500"
-                        : "bg-red-500"
-                    }`}
-                  ></div>
-                  <span className="font-medium">Player Window:</span>
-                  <span
-                    className={
-                      playerWindow && !playerWindow.closed
-                        ? "text-green-700"
-                        : "text-red-700"
-                    }
-                  >
-                    {playerWindow && !playerWindow.closed
-                      ? "Open & Ready"
-                      : playerWindow
-                        ? "Closed"
-                        : "Not Created"}
-                  </span>
-                </div>
-                <div className="text-xs text-slate-600 mt-1">
-                  Status: {isPlayerRunning ? "Running" : "Stopped"}
-                </div>
-              </div>
-
-              <div className="flex gap-2">
-                <Button
-                  onClick={onPlayerToggle}
-                  className={`flex items-center gap-2 ${isPlayerRunning ? "bg-red-600 hover:bg-red-700" : "bg-green-600 hover:bg-green-700"}`}
-                >
-                  {isPlayerRunning ? (
-                    <Pause className="w-4 h-4" />
-                  ) : (
-                    <Play className="w-4 h-4" />
-                  )}
-                  {isPlayerRunning ? "Pause Player" : "Start Player"}
-                </Button>
-                <Button
-                  onClick={onSkipSong}
-                  disabled={!isPlayerRunning}
-                  className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50"
-                >
-                  <SkipForward className="w-4 h-4" />
-                  Skip Song
-                </Button>
-                <Button
-                  onClick={onInitializePlayer}
-                  disabled={
-                    isPlayerRunning && playerWindow && !playerWindow.closed
-                  }
-                  className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50"
-                  title="Manually open/reopen the player window"
-                >
-                  <Settings2 className="w-4 h-4" />
-                  Open Player
-                </Button>
-              </div>
-
-              {/* Display Management Controls */}
-              <DisplayControls
-                playerWindow={playerWindow}
-                onInitializePlayer={onInitializePlayer}
-                selectedDisplay={selectedDisplay}
-                onSelectedDisplayChange={onSelectedDisplayChange}
-                useFullscreen={useFullscreen}
-                onUseFullscreenChange={onUseFullscreenChange}
-                autoDetectDisplay={autoDetectDisplay}
-                onAutoDetectDisplayChange={onAutoDetectDisplayChange}
-              />
-
-              {/* Debug Controls */}
-              <div className="mt-3 p-2 bg-yellow-50 border border-yellow-200 rounded">
-                <div className="text-xs font-medium text-yellow-800 mb-2">
-                  Debug Controls:
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    onClick={() => {
-                      console.log("[Debug] Current player state:", {
-                        playerWindow: !!playerWindow,
-                        closed: playerWindow?.closed,
-                        running: isPlayerRunning,
-                      });
-                      if (playerWindow) {
-                        console.log(
-                          "[Debug] Player window details:",
-                          playerWindow.location?.href,
-                        );
-                      }
-                    }}
-                    size="sm"
-                    variant="outline"
-                    className="text-xs"
-                  >
-                    Log State
-                  </Button>
-                  <Button
-                    onClick={() => {
-                      if (playerWindow && !playerWindow.closed) {
-                        try {
-                          const testCommand = {
-                            action: "play",
-                            videoId: "dQw4w9WgXcQ",
-                            title: "Debug Test Song",
-                            artist: "Debug Artist",
-                            timestamp: Date.now(),
-                          };
-                          localStorage.setItem(
-                            "jukeboxCommand",
-                            JSON.stringify(testCommand),
-                          );
-                          console.log("[Debug] Test command sent to player");
-                        } catch (error) {
-                          console.error(
-                            "[Debug] Error sending test command:",
-                            error,
-                          );
-                        }
-                      } else {
-                        console.error(
-                          "[Debug] No player window available for test",
-                        );
-                      }
-                    }}
-                    size="sm"
-                    className="text-xs bg-yellow-600 hover:bg-yellow-700"
-                    disabled={!playerWindow || playerWindow.closed}
-                  >
-                    Test Command
-                  </Button>
-                </div>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">
-                Mini Player
-              </label>
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  id="show-mini-player"
-                  checked={showMiniPlayer}
-                  onCheckedChange={onShowMiniPlayerChange}
-                />
-                <label
-                  htmlFor="show-mini-player"
-                  className="text-sm flex items-center gap-2"
-                >
-                  <Monitor className="w-4 h-4" />
-                  Show Mini-Player on Jukebox UI
-                </label>
-              </div>
-              <p className="text-xs text-slate-600 mt-1">
-                Displays a small synchronized video player on the main UI
-                (muted)
-              </p>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">
-                Maximum Song Length: {maxSongLength} minutes
-              </label>
-              <Slider
-                value={[maxSongLength]}
-                onValueChange={(value) => onMaxSongLengthChange(value[0])}
-                min={6}
-                max={15}
-                step={1}
-                className="w-full"
-              />
-              <div className="flex justify-between text-xs text-slate-500 mt-1">
-                <span>6 min</span>
-                <span>15 min</span>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">
-                Video Quality
-              </label>
-              <Select
-                value={videoQuality}
-                onValueChange={onVideoQualityChange}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select video quality" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="auto">Auto (YouTube Default)</SelectItem>
-                  <SelectItem value="hd1080">1080p HD</SelectItem>
-                  <SelectItem value="hd720">720p HD</SelectItem>
-                  <SelectItem value="large">480p Large</SelectItem>
-                  <SelectItem value="medium">360p Medium</SelectItem>
-                  <SelectItem value="small">240p Small</SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-slate-600 mt-1">
-                Set preferred YouTube video quality (may not always be available)
-              </p>
-            </div>
-
-            <div>
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="hideEndCards"
-                  checked={hideEndCards}
-                  onCheckedChange={onHideEndCardsChange}
-                />
-                <label
-                  htmlFor="hideEndCards"
-                  className="text-sm font-medium text-slate-700 cursor-pointer"
-                >
-                  Hide YouTube End Cards
-                </label>
-              </div>
-              <p className="text-xs text-slate-600 mt-1">
-                Note: YouTube end cards cannot be programmatically hidden via iframe API.
-                This setting is for future compatibility.
-              </p>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">
-                YouTube API Key
-              </label>
-              <div className="space-y-3">
-                <Select
-                  value={selectedApiKeyOption}
-                  onValueChange={onApiKeyOptionChange}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select an API key option" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="key1">API Key 1 (Primary)</SelectItem>
-                    <SelectItem value="key2">API Key 2</SelectItem>
-                    <SelectItem value="key3">API Key 3</SelectItem>
-                    <SelectItem value="key4">API Key 4</SelectItem>
-                    <SelectItem value="key5">API Key 5</SelectItem>
-                    <SelectItem value="custom">Custom API Key</SelectItem>
-                  </SelectContent>
-                </Select>
-
-                {selectedApiKeyOption === "custom" && (
-                  <Input
-                    value={customApiKey}
-                    onChange={(e) => onCustomApiKeyChange(e.target.value)}
-                    placeholder="Enter custom YouTube API Key"
-                    className="font-mono text-sm"
-                  />
-                )}
-
-                <div className="flex items-center justify-between p-3 bg-slate-100 rounded-lg">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-slate-700">
-                      Quota Usage:
-                    </span>
-                    {quotaLoading ? (
-                      <span className="text-xs text-slate-500">
-                        Checking...
-                      </span>
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        <div className="w-20 h-2 bg-slate-300 rounded-full overflow-hidden">
-                          <div
-                            className={`h-full transition-all duration-300 ${
-                              quotaUsage.percentage >= 90
-                                ? "bg-red-500"
-                                : quotaUsage.percentage >= 70
-                                  ? "bg-yellow-500"
-                                  : "bg-green-500"
-                            }`}
-                            style={{
-                              width: `${Math.min(quotaUsage.percentage, 100)}%`,
-                            }}
-                          />
-                        </div>
-                        <span className="text-xs font-mono text-slate-600">
-                          {quotaUsage.used.toLocaleString()}/
-                          {quotaUsage.limit.toLocaleString()}
-                        </span>
-                        <span className="text-xs text-slate-500">
-                          ({quotaUsage.percentage.toFixed(1)}%)
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex gap-2">
-                    <Button
-                      onClick={handleRefreshQuota}
-                      size="sm"
-                      variant="ghost"
-                      className="text-xs h-6 px-2"
-                    >
-                      Refresh
-                    </Button>
-                    <Button
-                      onClick={handleTestApiKey}
-                      disabled={testingApiKey || !apiKey}
-                      size="sm"
-                      variant="outline"
-                      className="text-xs h-6 px-2"
-                    >
-                      {testingApiKey ? "Testing..." : "Test Key"}
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <p className="text-xs text-slate-500">
-                    Active Key:{" "}
-                    {apiKey ? `...${apiKey.slice(-8)}` : "None selected"}
-                    {quotaUsage.lastUpdated && (
-                      <span className="ml-2">
-                        (Updated:{" "}
-                        {new Date(quotaUsage.lastUpdated).toLocaleTimeString()})
-                      </span>
-                    )}
-                  </p>
-
-                  {apiKeyTestResult && (
-                    <div
-                      className={`text-xs p-2 rounded ${
-                        apiKeyTestResult.isValid
-                          ? apiKeyTestResult.quotaUsed
-                            ? "bg-yellow-100 text-yellow-800"
-                            : "bg-green-100 text-green-800"
-                          : "bg-red-100 text-red-800"
-                      }`}
-                    >
-                      <span className="font-medium">
-                        {apiKeyTestResult.isValid ? "✓" : "✗"} API Key Test:
-                      </span>{" "}
-                      {apiKeyTestResult.message}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between p-3 bg-blue-50 rounded-lg">
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    checked={autoRotateApiKeys}
-                    onCheckedChange={onAutoRotateChange}
-                    id="auto-rotate"
-                  />
-                  <label
-                    htmlFor="auto-rotate"
-                    className="text-sm font-medium text-slate-700"
-                  >
-                    Auto-rotate API keys when quota exhausted
-                  </label>
-                </div>
-                {lastRotationTime && (
-                  <span className="text-xs text-slate-500">
-                    Last rotation:{" "}
-                    {new Date(lastRotationTime).toLocaleTimeString()}
-                  </span>
-                )}
-              </div>
-
-              {rotationHistory.length > 0 && (
-                <div className="space-y-2">
-                  <label className="block text-xs font-medium text-slate-700">
-                    Recent Rotations:
-                  </label>
-                  <div className="max-h-24 overflow-y-auto space-y-1">
-                    {rotationHistory.slice(0, 3).map((rotation, index) => (
-                      <div
-                        key={index}
-                        className="text-xs text-slate-600 p-2 bg-slate-100 rounded"
-                      >
-                        <span className="font-mono">
-                          ...{rotation.from} → ...{rotation.to}
-                        </span>
-                        <span className="ml-2 text-slate-500">
-                          {new Date(rotation.timestamp).toLocaleTimeString()}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
+            <ApiManagementPanel
+              selectedApiKeyOption={selectedApiKeyOption}
+              onApiKeyOptionChange={onApiKeyOptionChange}
+              customApiKey={customApiKey}
+              onCustomApiKeyChange={onCustomApiKeyChange}
+              apiKey={apiKey}
+              quotaUsage={quotaUsage}
+              quotaLoading={quotaLoading}
+              handleRefreshQuota={handleRefreshQuota}
+              handleTestApiKey={handleTestApiKey}
+              testingApiKey={testingApiKey}
+              apiKeyTestResult={apiKeyTestResult}
+              autoRotateApiKeys={autoRotateApiKeys}
+              onAutoRotateChange={onAutoRotateChange}
+              lastRotationTime={lastRotationTime}
+              rotationHistory={rotationHistory}
+              validApiKeys={validApiKeys}
+              validatingKeys={validatingKeys}
+              onValidateAllKeys={handleValidateAllKeys}
+            />
 
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-2">
@@ -1167,157 +796,45 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
               </p>
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">
-                Main UI Background
-              </label>
-              <div className="flex gap-2 items-center mb-2">
-                <Select
-                  value={selectedBackground}
-                  onValueChange={handleBackgroundSelectChange}
-                >
-                  <SelectTrigger className="flex-1">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {backgrounds.map((bg) => (
-                      <SelectItem key={bg.id} value={bg.id}>
-                        {bg.name} ({bg.type})
-                      </SelectItem>
-                    ))}
-                    <SelectItem value="add-new">
-                      <Upload className="w-4 h-4 mr-2" />
-                      Add Background...
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-
-                <div className="flex items-center gap-4">
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      id="cycle-backgrounds"
-                      checked={cycleBackgrounds}
-                      onCheckedChange={onCycleBackgroundsChange}
-                    />
-                    <label htmlFor="cycle-backgrounds" className="text-sm">
-                      Cycle Backgrounds
-                    </label>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      id="bounce-videos"
-                      checked={bounceVideos}
-                      onCheckedChange={onBounceVideosChange}
-                    />
-                    <label htmlFor="bounce-videos" className="text-sm">
-                      Bounce Videos
-                    </label>
-                  </div>
-                </div>
-              </div>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*,video/*"
-                style={{ display: "none" }}
-                onChange={onBackgroundUpload}
+            {/* Background Assets and Queue */}
+            <BackgroundAssetsErrorBoundary>
+              <BackgroundAssetsPanel
+                backgrounds={backgrounds}
+                backgroundQueue={backgroundQueue}
+                onAddToQueue={onAddToBackgroundQueue}
+                onRemoveFromQueue={onRemoveFromBackgroundQueue}
+                onReorderQueue={onReorderBackgroundQueue}
+                onUpdateQueueItem={onUpdateBackgroundQueueItem}
+                onTestQueue={onTestBackgroundQueue}
+                isTestingMode={isTestingBackgroundQueue}
+                currentTestIndex={currentTestIndex}
+                onAddCustomAsset={() => fileInputRef.current?.click()}
               />
-            </div>
+            </BackgroundAssetsErrorBoundary>
+
+            {/* Background Settings */}
+            <BackgroundSettingsPanel
+              settings={backgroundSettings}
+              onSettingsChange={onBackgroundSettingsChange}
+              bgVisualMode={bgVisualMode}
+              onBgVisualModeChange={onBgVisualModeChange}
+            />
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*,video/*"
+              style={{ display: "none" }}
+              onChange={onBackgroundUpload}
+            />
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
-                <div className="flex justify-between items-center mb-2">
-                  <label className="block text-sm font-medium text-slate-700">
-                    Activity Log
-                  </label>
-                  <Button
-                    onClick={() => exportLogs("event")}
-                    size="sm"
-                    variant="outline"
-                    className="flex items-center gap-1"
-                  >
-                    <Download className="w-3 h-3" />
-                    Export
-                  </Button>
-                </div>
-                <ScrollArea className="h-48 border rounded-md p-2 bg-white">
-                  {logs.map((log, index) => (
-                    <div key={index} className="text-xs mb-1 border-b pb-1">
-                      <span className="text-gray-500">
-                        {new Date(log.timestamp).toLocaleString()}
-                      </span>
-                      <span className="ml-2 font-semibold">[{log.type}]</span>
-                      <span className="ml-2">{log.description}</span>
-                    </div>
-                  ))}
-                </ScrollArea>
-              </div>
-
-              <div>
-                <div className="flex justify-between items-center mb-2">
-                  <label className="block text-sm font-medium text-slate-700">
-                    User Requests
-                  </label>
-                  <Button
-                    onClick={() => exportLogs("user_requests")}
-                    size="sm"
-                    variant="outline"
-                    className="flex items-center gap-1"
-                  >
-                    <Download className="w-3 h-3" />
-                    Export
-                  </Button>
-                </div>
-                <ScrollArea className="h-48 border rounded-md p-2 bg-white">
-                  {userRequests.map((request, index) => (
-                    <div key={index} className="text-xs mb-1 border-b pb-1">
-                      <span className="text-gray-500">
-                        {new Date(request.timestamp).toLocaleString()}
-                      </span>
-                      <div className="font-semibold">
-                        {cleanTitle(request.title)}
-                      </div>
-                      <div className="text-gray-600">
-                        by {request.channelTitle}
-                      </div>
-                    </div>
-                  ))}
-                </ScrollArea>
-              </div>
-
-              <div>
-                <div className="flex justify-between items-center mb-2">
-                  <label className="block text-sm font-medium text-slate-700">
-                    Credit History
-                  </label>
-                  <Button
-                    onClick={() => exportLogs("credit_history")}
-                    size="sm"
-                    variant="outline"
-                    className="flex items-center gap-1"
-                  >
-                    <Download className="w-3 h-3" />
-                    Export
-                  </Button>
-                </div>
-                <ScrollArea className="h-48 border rounded-md p-2 bg-white">
-                  {creditHistory.map((credit, index) => (
-                    <div key={index} className="text-xs mb-1 border-b pb-1">
-                      <span className="text-gray-500">
-                        {new Date(credit.timestamp).toLocaleString()}
-                      </span>
-                      <span
-                        className={`ml-2 font-semibold ${credit.type === "ADDED" ? "text-green-600" : "text-red-600"}`}
-                      >
-                        {credit.type === "ADDED" ? "+" : "-"}
-                        {credit.amount}
-                      </span>
-                      <div className="text-gray-600">{credit.description}</div>
-                    </div>
-                  ))}
-                </ScrollArea>
-              </div>
+            <LogsPanel
+              logs={logs}
+              userRequests={userRequests}
+              creditHistory={creditHistory}
+              exportLogs={exportLogs}
+            />
             </div>
 
             {/**
@@ -1357,145 +874,32 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
              */}
             <Separator className="my-6" />
             <div className="space-y-4">
-              <div className="flex items-center gap-2 mb-4">
-                <Settings2 className="w-5 h-5 text-primary" />
-                <h3 className="text-lg font-semibold text-slate-900">Settings Management</h3>
-              </div>
-              
-              {/* Master Save Button */}
-              <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
-                <Button
-                  onClick={() => {
-                    // Save USER_PREFERENCES
-                    const userPrefs = {
-                      mode,
-                      credits,
-                      defaultPlaylist,
-                      apiKey,
-                      selectedApiKeyOption,
-                      customApiKey,
-                      autoRotateApiKeys,
-                      searchMethod,
-                      selectedCoinAcceptor,
-                      selectedBackground,
-                      cycleBackgrounds,
-                      bounceVideos,
-                      maxSongLength,
-                      showMiniPlayer,
-                      testMode,
-                      videoQuality,
-                      hideEndCards,
-                      coinValueA,
-                      coinValueB,
-                      selectedDisplay,
-                      useFullscreen,
-                      autoDetectDisplay,
-                      playerWindowPosition: null, // Will be saved separately
-                    };
-                    localStorage.setItem('USER_PREFERENCES', JSON.stringify(userPrefs));
-                    
-                    // Save ACTIVE_PLAYLIST (current in-memory playlist)
-                    if (currentPlaylistVideos && currentPlaylistVideos.length > 0) {
-                      localStorage.setItem('ACTIVE_QUEUE', JSON.stringify(currentPlaylistVideos));
-                    }
-                    
-                    // Save CURRENT_QUEUE_INDEX
-                    localStorage.setItem('current_video_index', '0'); // Reset to start on save
-                    
-                    // Save PRIORITY_QUEUE
-                    if (priorityQueue && priorityQueue.length > 0) {
-                      localStorage.setItem('PRIORITY_QUEUE', JSON.stringify(priorityQueue));
-                    }
-                    
-                    // Save ACTIVE_PLAYLIST_DATA (original loaded playlist)
-                    localStorage.setItem('active_playlist_data', JSON.stringify(currentPlaylistVideos));
-                    
-                    console.log('[Master Save] All current configuration saved to localStorage');
-                    alert('Current configuration saved successfully!');
-                  }}
-                  className="bg-green-600 hover:bg-green-700 text-white flex items-center gap-2 w-full"
-                  size="lg"
-                >
-                  <Settings2 className="w-5 h-5" />
-                  SAVE CURRENT CONFIGURATION
-                </Button>
-                <p className="text-xs text-green-700 mt-2">
-                  Master save button - writes all current settings, playlists, and queue state to localStorage.
-                </p>
-              </div>
-              
-              <div className="flex gap-2">
-                <Button
-                  onClick={() => {
-                    const settings = {
-                      version: "1.0",
-                      timestamp: new Date().toISOString(),
-                      preferences: localStorage.getItem('USER_PREFERENCES'),
-                      playlists: localStorage.getItem('CUSTOM_PLAYLISTS'),
-                    };
-                    
-                    const blob = new Blob([JSON.stringify(settings, null, 2)], { 
-                      type: 'application/json' 
-                    });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `jukebox-settings-${Date.now()}.json`;
-                    a.click();
-                    URL.revokeObjectURL(url);
-                  }}
-                  variant="outline"
-                  className="flex items-center gap-2"
-                >
-                  <Download className="w-4 h-4" />
-                  Export Settings
-                </Button>
-                <Button
-                  onClick={() => {
-                    const input = document.createElement('input');
-                    input.type = 'file';
-                    input.accept = 'application/json';
-                    input.onchange = (e) => {
-                      const file = (e.target as HTMLInputElement).files?.[0];
-                      if (!file) return;
-                      
-                      const reader = new FileReader();
-                      reader.onload = (event) => {
-                        try {
-                          const settings = JSON.parse(event.target?.result as string);
-                          
-                          if (settings.version !== "1.0") {
-                            alert("Incompatible settings version");
-                            return;
-                          }
-                          
-                          if (settings.preferences) {
-                            localStorage.setItem('USER_PREFERENCES', settings.preferences);
-                          }
-                          if (settings.playlists) {
-                            localStorage.setItem('CUSTOM_PLAYLISTS', settings.playlists);
-                          }
-                          
-                          alert("Settings imported successfully! Reloading page...");
-                          window.location.reload();
-                        } catch (error) {
-                          alert("Failed to import settings: Invalid file format");
-                        }
-                      };
-                      reader.readAsText(file);
-                    };
-                    input.click();
-                  }}
-                  variant="outline"
-                  className="flex items-center gap-2"
-                >
-                  <Upload className="w-4 h-4" />
-                  Import Settings
-                </Button>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Export your settings to backup or transfer to another device. Import will reload the page.
-              </p>
+            <SettingsManagementPanel
+              mode={mode}
+              credits={credits}
+              defaultPlaylist={defaultPlaylist}
+              apiKey={apiKey}
+              selectedApiKeyOption={selectedApiKeyOption}
+              customApiKey={customApiKey}
+              autoRotateApiKeys={autoRotateApiKeys}
+              searchMethod={searchMethod}
+              selectedCoinAcceptor={selectedCoinAcceptor}
+              selectedBackground={selectedBackground}
+              cycleBackgrounds={cycleBackgrounds}
+              bounceVideos={bounceVideos}
+              maxSongLength={maxSongLength}
+              showMiniPlayer={showMiniPlayer}
+              testMode={testMode}
+              videoQuality={videoQuality}
+              hideEndCards={hideEndCards}
+              coinValueA={coinValueA}
+              coinValueB={coinValueB}
+              selectedDisplay={selectedDisplay}
+              useFullscreen={useFullscreen}
+              autoDetectDisplay={autoDetectDisplay}
+              currentPlaylistVideos={currentPlaylistVideos}
+              priorityQueue={priorityQueue}
+            />
             </div>
           </div>
         </DialogContent>
@@ -1522,25 +926,38 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
             </DialogDescription>
           </DialogHeader>
           <ScrollArea className="h-96 border rounded-md p-4 bg-white">
-            {/* Now Playing Section */}
-            {currentlyPlaying && currentlyPlaying !== "Loading..." && (
+            {/* Currently Playing Section */}
+            {currentPlaylistVideos.some(v => v.isNowPlaying) && (
               <div className="mb-4">
-                <div className="flex items-center gap-3 p-3 bg-green-50 border-green-200 border rounded-md">
-                  <div className="w-4 h-4 bg-green-500 rounded-full flex items-center justify-center">
-                    <Play className="w-2 h-2 text-white" />
-                  </div>
-                  <span className="text-sm font-mono text-gray-500 w-8">
-                    ��
-                  </span>
-                  <div className="flex-1">
-                    <div className="font-semibold text-sm text-green-700">
-                      {cleanTitle(currentlyPlaying)} (Now Playing)
-                    </div>
-                    <div className="text-xs text-green-600">
-                      Currently Playing
-                    </div>
-                  </div>
+                <div className="flex items-center gap-2 mb-2">
+                  <Play className="w-4 h-4 text-green-600" />
+                  <h3 className="font-semibold text-green-700">
+                    Currently Playing
+                  </h3>
                 </div>
+                {currentPlaylistVideos
+                  .filter(video => video.isNowPlaying)
+                  .map((video, index) => (
+                    <div
+                      key={`now-playing-${video.id}-${index}`}
+                      className="flex items-center gap-3 p-3 bg-green-50 border-green-200 border rounded-md"
+                    >
+                      <div className="w-4 h-4 bg-green-500 rounded-full flex items-center justify-center">
+                        <Play className="w-2 h-2 text-white" />
+                      </div>
+                      <span className="text-sm font-mono text-gray-500 w-8">
+                        NP
+                      </span>
+                      <div className="flex-1">
+                        <div className="font-semibold text-sm text-green-700">
+                          {cleanTitle(video.title)}
+                        </div>
+                        <div className="text-xs text-green-600">
+                          {video.channelTitle}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
               </div>
             )}
 
@@ -1587,45 +1004,76 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
               )}
             </div>
 
-            {/* Default Playlist Section */}
+            {/* Playlist Section - Circular Display */}
             <div>
               <div className="flex items-center gap-2 mb-2">
                 <List className="w-4 h-4 text-gray-600" />
                 <h3 className="font-semibold text-gray-700">
-                  Default Playlist:{" "}
-                  {
-                    currentPlaylistVideos.filter(
-                      (v) => !v.isUserRequest && !v.isNowPlaying,
-                    ).length
-                  }{" "}
-                  songs
+                  Playlist: {currentPlaylistVideos.filter(v => !v.isUserRequest && !v.isNowPlaying).length} songs
                 </h3>
               </div>
-              {currentPlaylistVideos
-                .filter((video) => !video.isUserRequest && !video.isNowPlaying)
-                .map((video, index) => (
-                  <div
-                    key={`default-${video.id}-${index}`}
-                    className="flex items-center gap-3 p-3 border-b hover:bg-gray-50"
-                  >
-                    <span className="text-sm font-mono text-gray-500 w-8">
-                      {index + 1}.
-                    </span>
-                    <div className="flex-1">
-                      <div className="font-semibold text-sm">
-                        {cleanTitle(video.title)}
-                      </div>
-                      <div className="text-xs text-gray-600">
-                        {video.channelTitle}
-                      </div>
-                    </div>
+
+              {/* Upcoming Songs */}
+              {currentPlaylistVideos.filter(v => !v.isUserRequest && !v.isNowPlaying && !v.isAlreadyPlayed).length > 0 && (
+                <div className="mb-4">
+                  <h4 className="text-sm font-medium text-gray-600 mb-2">Upcoming:</h4>
+                  <div className="space-y-1">
+                    {currentPlaylistVideos
+                      .filter(video => !video.isUserRequest && !video.isNowPlaying && !video.isAlreadyPlayed)
+                      .map((video, index) => (
+                        <div
+                          key={`upcoming-${video.id}-${index}`}
+                          className="flex items-center gap-3 p-3 border-b hover:bg-gray-50"
+                        >
+                          <span className="text-sm font-mono text-gray-500 w-8">
+                            {index + 1}.
+                          </span>
+                          <div className="flex-1">
+                            <div className="font-semibold text-sm">
+                              {cleanTitle(video.title)}
+                            </div>
+                            <div className="text-xs text-gray-600">
+                              {video.channelTitle}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
                   </div>
-                ))}
-              {currentPlaylistVideos.filter(
-                (v) => !v.isUserRequest && !v.isNowPlaying,
-              ).length === 0 && (
+                </div>
+              )}
+
+              {/* Already Played Songs */}
+              {currentPlaylistVideos.filter(v => v.isAlreadyPlayed).length > 0 && (
+                <div>
+                  <h4 className="text-sm font-medium text-gray-500 mb-2">Already Played:</h4>
+                  <div className="space-y-1 opacity-60">
+                    {currentPlaylistVideos
+                      .filter(video => video.isAlreadyPlayed)
+                      .map((video, index) => (
+                        <div
+                          key={`played-${video.id}-${index}`}
+                          className="flex items-center gap-3 p-3 border-b hover:bg-gray-50 bg-gray-50"
+                        >
+                          <span className="text-sm font-mono text-gray-400 w-8">
+                            ✓
+                          </span>
+                          <div className="flex-1">
+                            <div className="font-semibold text-sm text-gray-500">
+                              {cleanTitle(video.title)}
+                            </div>
+                            <div className="text-xs text-gray-400">
+                              {video.channelTitle}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
+
+              {currentPlaylistVideos.filter(v => !v.isUserRequest && !v.isNowPlaying).length === 0 && (
                 <div className="text-center py-4 text-gray-500">
-                  No songs in default playlist
+                  No songs in playlist
                 </div>
               )}
             </div>
@@ -1715,6 +1163,12 @@ const DisplayControls: React.FC<DisplayControlsProps> = ({
       playerWindow.close();
     }
 
+    // If mini player is selected, don't open a window - the embedded player will be used instead
+    if (showMiniPlayer) {
+      console.log("[DisplayControls] Mini player mode selected - using embedded player");
+      return;
+    }
+
     // Open player on selected display
     const features = displayManager.generateWindowFeatures(
       display,
@@ -1764,49 +1218,54 @@ const DisplayControls: React.FC<DisplayControlsProps> = ({
           </label>
         </div>
 
-        {/* Display selection */}
-        <div>
-          <label className="block text-xs font-medium text-blue-700 mb-1">
-            Target Display:
+        {/* Show display selection dialog toggle */}
+        <div className="flex items-center gap-2">
+          <Checkbox
+            checked={showDisplaySelectionDialogOnStartup}
+            onCheckedChange={(checked) => onShowDisplaySelectionDialogOnStartupChange(checked === true)}
+            id="show-display-selection-dialog"
+          />
+          <label
+            htmlFor="show-display-selection-dialog"
+            className="text-sm text-blue-700"
+          >
+            Show the Video Player Default Display Selector dialogue on startup
           </label>
-          <Select value={selectedDisplay} onValueChange={onSelectedDisplayChange}>
-            <SelectTrigger className="w-full">
-              <SelectValue placeholder="Select display..." />
-            </SelectTrigger>
-            <SelectContent>
-              {availableDisplays.map((display) => (
-                <SelectItem key={display.id} value={display.id}>
-                  {display.name}{" "}
-                  {display.isPrimary ? "(Primary)" : "(Secondary)"} -{" "}
-                  {display.width}x{display.height}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
         </div>
 
+        {/* Display selection */}
+        <DisplayButtonGrid
+          displays={availableDisplays}
+          selectedDisplay={selectedDisplay}
+          onDisplaySelect={onSelectedDisplayChange}
+          disabled={showMiniPlayer}
+        />
+
         {/* Fullscreen toggle */}
-        <div className="flex items-center gap-2">
+        <div className={`flex items-center gap-2 ${showMiniPlayer ? 'opacity-50' : ''}`}>
           <Checkbox
             checked={useFullscreen}
             onCheckedChange={(checked) => onUseFullscreenChange(checked === true)}
             id="use-fullscreen"
+            disabled={showMiniPlayer}
           />
-          <label htmlFor="use-fullscreen" className="text-sm text-blue-700">
+          <label htmlFor="use-fullscreen" className={`text-sm ${showMiniPlayer ? 'text-gray-400' : 'text-blue-700'}`}>
             Open in fullscreen mode
+            {showMiniPlayer && <span className="text-xs text-gray-400 ml-1">(disabled in mini player mode)</span>}
           </label>
         </div>
 
         {/* Action buttons */}
-        <div className="flex gap-2">
+        <div className={`flex gap-2 ${showMiniPlayer ? 'opacity-50' : ''}`}>
           <Button
             onClick={handleOpenPlayerOnDisplay}
-            disabled={!selectedDisplay}
+            disabled={!selectedDisplay || showMiniPlayer}
             className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50"
             size="sm"
           >
             <ExternalLink className="w-4 h-4" />
             Reopen on Selected Display
+            {showMiniPlayer && <span className="text-xs ml-1">(disabled in mini player mode)</span>}
           </Button>
         </div>
 

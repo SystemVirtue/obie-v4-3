@@ -9,20 +9,24 @@
   <script src="https://www.youtube.com/iframe_api"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
+    html, body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      background: #000000;
       color: white;
       height: 100vh;
+      width: 100vw;
       display: flex;
       align-items: center;
       justify-content: center;
       overflow: hidden;
+      margin: 0;
+      padding: 0;
     }
     
     #player-container {
-      width: 100%;
-      height: 100%;
+      position: relative;
+      width: 100vw;
+      height: 100vh;
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -34,6 +38,17 @@
       height: 100%;
       opacity: 1;
       transition: opacity 0.05s ease-out;
+    }
+    
+    #click-blocker {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 85%; /* Cover most of video, leave room for controls */
+      background: transparent;
+      z-index: 100;
+      cursor: default;
     }
     
     #now-playing {
@@ -69,6 +84,7 @@
   
   <div id="player-container">
     <div id="player"></div>
+    <div id="click-blocker" style="position: absolute; top: 0; left: 0; width: 100%; height: 85%; background: transparent; z-index: 10; pointer-events: auto;" onclick="event.stopPropagation(); event.preventDefault(); return false;"></div>
     <div id="now-playing" style="display:none">
       <h2 id="track-title">Loading...</h2>
       <div id="queue-info">Queue: <span id="queue-count">0</span> songs</div>
@@ -80,10 +96,167 @@
     
     // ========== VARIABLE DECLARATIONS ==========
     let player = null;
+    let playerReady = false;
     let currentVideoId = '';
     let isPlaying = false;
     let testMode = false;
     let testModeTimeout = null;
+    
+    // ========== ADAPTIVE QUALITY VARIABLES ==========
+    let adaptiveQualityEnabled = false;
+    let systemProfile = {};
+    let optimalQuality = 'hd720';
+    
+    // ========== PERMISSION HANDLING ==========
+    let autoplayPermissionRequested = false;
+    let fullscreenPermissionRequested = false;
+    
+    function requestAutoplayPermission() {
+      if (autoplayPermissionRequested) return;
+      
+      // Check if permission was already granted
+      if (checkExistingPermission('autoplay')) {
+        console.log('[Player] Autoplay permission already granted, skipping request');
+        return;
+      }
+      
+      autoplayPermissionRequested = true;
+      
+      console.log('[Player] Requesting autoplay permission from main window');
+      
+      // Send message to main window to show permission dialog
+      const permissionRequest = {
+        type: 'permissionRequest',
+        permission: 'autoplay',
+        timestamp: Date.now()
+      };
+      
+      // Try to communicate with parent window if available
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage(permissionRequest, '*');
+      }
+      
+      // Also store in localStorage as backup
+      localStorage.setItem('jukeboxPermissionRequest', JSON.stringify(permissionRequest));
+    }
+    
+    function requestFullscreenPermission() {
+      if (fullscreenPermissionRequested) return;
+      
+      // Check if permission was already granted
+      if (checkExistingPermission('fullscreen')) {
+        console.log('[Player] Fullscreen permission already granted, skipping request');
+        return;
+      }
+      
+      fullscreenPermissionRequested = true;
+      
+      console.log('[Player] Requesting fullscreen permission from main window');
+      
+      // Send message to main window to show permission dialog
+      const permissionRequest = {
+        type: 'permissionRequest',
+        permission: 'fullscreen',
+        timestamp: Date.now()
+      };
+      
+      // Try to communicate with parent window if available
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage(permissionRequest, '*');
+      }
+      
+      // Also store in localStorage as backup
+      localStorage.setItem('jukeboxPermissionRequest', JSON.stringify(permissionRequest));
+    }
+    
+    function checkExistingPermission(permissionType) {
+      try {
+        const permissions = JSON.parse(localStorage.getItem('jukeboxPermissions') || '{}');
+        const permission = permissions[permissionType];
+        
+        if (permission && permission.granted) {
+          // Check if permission is still valid (within 30 days)
+          const grantedTime = permission.timestamp || 0;
+          const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+          const now = Date.now();
+          
+          return (now - grantedTime) < thirtyDaysMs;
+        }
+      } catch (error) {
+        console.error('[Player] Error checking existing permission:', error);
+      }
+      return false;
+    }
+    
+    function handlePermissionResponse(permission, granted) {
+      console.log(`[Player] Permission response received: ${permission} = ${granted}`);
+      
+      if (permission === 'autoplay') {
+        autoplayPermissionRequested = false;
+        if (granted) {
+          // Try to play again
+          if (player && playerReady && currentVideoId) {
+            console.log('[Player] Retrying autoplay after permission granted');
+            player.playVideo();
+          }
+        }
+      } else if (permission === 'fullscreen') {
+        fullscreenPermissionRequested = false;
+        // Fullscreen permission will be handled by the fullscreen command
+      }
+    }
+    
+    // ========== ADAPTIVE QUALITY FUNCTIONS ==========
+    function updateSystemProfile() {
+      systemProfile = {
+        memory: navigator.deviceMemory,
+        cores: navigator.hardwareConcurrency,
+        connection: navigator.connection || navigator.mozConnection || navigator.webkitConnection
+      };
+      
+      // Calculate optimal quality
+      optimalQuality = calculateOptimalQuality();
+      console.log('[Adaptive] System profile updated:', systemProfile, 'Optimal quality:', optimalQuality);
+    }
+    
+    function calculateOptimalQuality() {
+      if (!adaptiveQualityEnabled) return 'hd720';
+      
+      // Very low-end device (2GB RAM or less)
+      if (systemProfile.memory && systemProfile.memory <= 2) {
+        return 'small';
+      }
+      
+      // Slow connection
+      if (systemProfile.connection) {
+        const conn = systemProfile.connection;
+        if (conn.effectiveType === 'slow-2g' || conn.effectiveType === '2g') {
+          return 'small';
+        }
+        if (conn.effectiveType === '3g' || conn.downlink < 1.5) {
+          return 'medium';
+        }
+      }
+      
+      // Low CPU cores
+      if (systemProfile.cores && systemProfile.cores <= 2) {
+        return 'medium';
+      }
+      
+      // Default to HD
+      return 'hd720';
+    }
+    
+    function applyAdaptiveQuality() {
+      if (!player || !adaptiveQualityEnabled) return;
+      
+      try {
+        player.setPlaybackQuality(optimalQuality);
+        console.log('[Adaptive] Applied quality:', optimalQuality);
+      } catch (e) {
+        console.warn('[Adaptive] Could not set adaptive quality:', e);
+      }
+    }
     
     // ========== YOUTUBE API CALLBACK ==========
     window.onYouTubeIframeAPIReady = function() {
@@ -115,7 +288,43 @@
 
     function onPlayerReady(event) {
       console.log('[Player] Ready');
+      playerReady = true;
       sendStatus('ready', 'Player initialized');
+      
+      // Create click blocker to prevent pause/play on video area clicks
+      const clickBlocker = document.createElement('div');
+      clickBlocker.id = 'click-blocker';
+      clickBlocker.style.cssText = `
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 85%;
+        background: rgba(255, 0, 0, 0.1); /* Temporary visible background for debugging */
+        z-index: 9999;
+        cursor: not-allowed;
+        pointer-events: auto;
+      `;
+      clickBlocker.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log('[Player] Click blocked on video area');
+        return false;
+      });
+      
+      const playerContainer = document.getElementById('player-container');
+      if (playerContainer) {
+        playerContainer.appendChild(clickBlocker);
+        console.log('[Player] Click blocker added');
+      }
+      
+      // Initialize adaptive quality monitoring
+      updateSystemProfile();
+      
+      // Listen for connection changes
+      if (systemProfile.connection) {
+        systemProfile.connection.addEventListener('change', updateSystemProfile);
+      }
       
       // Check if there's a pending command
       checkForCommands();
@@ -138,7 +347,19 @@
       if (event.data === YT.PlayerState.PLAYING) {
         isPlaying = true;
         const videoData = player.getVideoData();
-        sendStatus('playing', videoData.title, currentVideoId);
+        
+        // Check if we need to fade in (opacity or volume might be low from previous pause)
+        const playerElement = document.getElementById('player');
+        const currentOpacity = playerElement ? parseFloat(playerElement.style.opacity || '1') : 1;
+        const currentVolume = player.getVolume();
+        
+        if (currentOpacity < 1 || currentVolume < 100) {
+          console.log('[Player] Detected low opacity/volume on play, triggering fade in');
+          fadeInAndComplete('playing');
+        } else {
+          sendStatus('playing', videoData.title, currentVideoId);
+        }
+        
         document.getElementById('now-playing').style.display = 'block';
         document.getElementById('track-title').textContent = videoData.title || 'Now Playing';
       } else if (event.data === YT.PlayerState.PAUSED) {
@@ -158,6 +379,17 @@
         currentVideoId = '';
       } else if (event.data === YT.PlayerState.BUFFERING) {
         sendStatus('buffering', 'Buffering...');
+      } else if (event.data === YT.PlayerState.CUED) {
+        // Video is cued but not playing - this might indicate autoplay failure
+        console.log('[Player] Video cued, checking for autoplay issues');
+        
+        // Wait a moment to see if it starts playing automatically
+        setTimeout(() => {
+          if (player && !isPlaying && currentVideoId && !autoplayPermissionRequested) {
+            console.log('[Player] Autoplay appears to have failed, requesting permission');
+            requestAutoplayPermission();
+          }
+        }, 1000);
       }
     }
 
@@ -206,13 +438,27 @@
     function processCommand(command) {
       console.log('[Player] Processing command:', command);
       
-      if (!player) {
+      if (!player || !playerReady) {
         console.warn('[Player] Player not ready yet');
         return;
       }
       
       switch (command.action) {
         case 'play':
+          // Clear any ongoing fade before loading new video
+          if (fadeTimer) {
+            clearInterval(fadeTimer);
+            fadeTimer = null;
+            console.log('[Player] Cleared ongoing fade for new video');
+            
+            // Reset player state
+            player.setVolume(100); // Restore volume
+            const playerElement = document.getElementById('player');
+            if (playerElement) {
+              playerElement.style.opacity = '1'; // Reset opacity
+            }
+          }
+          
           if (command.videoId && command.videoId !== currentVideoId) {
             console.log('[Player] Loading video:', command.videoId);
             currentVideoId = command.videoId;
@@ -224,10 +470,23 @@
               testModeTimeout = null;
             }
             
+            // Check if loadVideoById method is available
+            if (typeof player.loadVideoById !== 'function') {
+              console.warn('[Player] loadVideoById method not available yet');
+              return;
+            }
+            
             player.loadVideoById({
               videoId: command.videoId,
               startSeconds: 0
             });
+            
+            // Ensure video starts playing - call immediately and with retry
+            player.playVideo();
+            setTimeout(() => {
+              console.log('[Player] Ensuring video plays after load');
+              player.playVideo();
+            }, 200);
             
             // Reset opacity for new video
             const playerElement = document.getElementById('player');
@@ -235,28 +494,36 @@
               playerElement.style.opacity = '1';
             }
             
-            // Set video quality if specified
-            if (command.videoQuality && command.videoQuality !== 'auto') {
-              // Map our quality names to YouTube quality levels
-              const qualityMap = {
-                'small': 'small',
-                'medium': 'medium', 
-                'large': 'large',
-                'hd720': 'hd720',
-                'hd1080': 'hd1080'
-              };
-              const ytQuality = qualityMap[command.videoQuality];
-              if (ytQuality) {
-                // Set quality after a short delay to ensure video is loaded
-                setTimeout(() => {
-                  try {
-                    player.setPlaybackQuality(ytQuality);
-                    console.log('[Player] Set video quality to:', ytQuality);
-                  } catch (e) {
-                    console.warn('[Player] Could not set video quality:', e);
-                  }
-                }, 1000);
-              }
+            // Set video quality - use adaptive quality if enabled, otherwise use command quality
+            let targetQuality = 'hd720'; // default
+            
+            if (adaptiveQualityEnabled) {
+              targetQuality = optimalQuality;
+              console.log('[Adaptive] Using adaptive quality:', targetQuality);
+            } else if (command.videoQuality && command.videoQuality !== 'auto') {
+              targetQuality = command.videoQuality;
+              console.log('[Player] Using command quality:', targetQuality);
+            }
+            
+            // Map our quality names to YouTube quality levels
+            const qualityMap = {
+              'small': 'small',
+              'medium': 'medium', 
+              'large': 'large',
+              'hd720': 'hd720',
+              'hd1080': 'hd1080'
+            };
+            const ytQuality = qualityMap[targetQuality];
+            if (ytQuality) {
+              // Set quality after a short delay to ensure video is loaded
+              setTimeout(() => {
+                try {
+                  player.setPlaybackQuality(ytQuality);
+                  console.log('[Player] Set video quality to:', ytQuality);
+                } catch (e) {
+                  console.warn('[Player] Could not set video quality:', e);
+                }
+              }, 1000);
             }
             
             document.getElementById('track-title').textContent = command.title || 'Loading...';
@@ -272,7 +539,7 @@
               console.log('[Player] Test mode enabled - will fade out after 20 seconds');
               testModeTimeout = setTimeout(() => {
                 console.log('[Player] Test mode timeout - fading out');
-                fadeOutAndComplete();
+                fadeOutAndComplete('fadeComplete');
               }, 20000);
             }
           } else if (!command.videoId) {
@@ -284,12 +551,24 @@
           player.pauseVideo();
           break;
           
+        case 'resume':
+          player.playVideo();
+          break;
+          
+        case 'fadeIn':
+          fadeInAndComplete('resumeComplete');
+          break;
+          
         case 'fadeOut':
-          fadeOutAndComplete();
+          fadeOutAndComplete('fadeComplete');
+          break;
+          
+        case 'fadePause':
+          fadeOutAndComplete('pauseComplete');
           break;
           
         case 'fadeOutAndBlack':
-          fadeOutAndComplete();
+          fadeOutAndComplete('skipComplete');
           break;
           
         case 'volume':
@@ -313,11 +592,25 @@
           if (command.enable !== false) {
             document.documentElement.requestFullscreen().catch(e => {
               console.warn('[Player] Could not enter fullscreen:', e);
+              // Check if it's a permission error
+              if (e.name === 'NotAllowedError' && !fullscreenPermissionRequested) {
+                console.log('[Player] Fullscreen blocked by permissions, requesting permission');
+                requestFullscreenPermission();
+              }
             });
           } else {
             document.exitFullscreen().catch(e => {
               console.warn('[Player] Could not exit fullscreen:', e);
             });
+          }
+          break;
+          
+        case 'setAdaptiveQuality':
+          adaptiveQualityEnabled = command.enabled || false;
+          console.log('[Adaptive] Quality adaptation:', adaptiveQualityEnabled ? 'enabled' : 'disabled');
+          if (adaptiveQualityEnabled) {
+            updateSystemProfile();
+            applyAdaptiveQuality();
           }
           break;
           
@@ -329,8 +622,16 @@
       localStorage.removeItem('jukeboxCommand');
     }
 
-    function fadeOutAndComplete() {
+    let fadeTimer = null; // Global variable to track fade timer
+    
+    function fadeOutAndComplete(statusType) {
       console.log('[Player] Fading out with volume and opacity...');
+      
+      // Clear any existing fade timer
+      if (fadeTimer) {
+        clearInterval(fadeTimer);
+        fadeTimer = null;
+      }
       
       // Clear test mode timeout if exists
       if (testModeTimeout) {
@@ -344,7 +645,7 @@
       const fadeInterval = 50; // ms per step
       let currentStep = 0;
       
-      const fadeTimer = setInterval(() => {
+      fadeTimer = setInterval(() => {
         currentStep++;
         const progress = currentStep / fadeSteps;
         
@@ -360,16 +661,73 @@
         
         if (currentStep >= fadeSteps) {
           clearInterval(fadeTimer);
+          fadeTimer = null;
+          console.log('[Player] Fade complete, pausing video and sending status:', statusType);
           player.pauseVideo();
           player.setVolume(startVolume); // Restore volume for next song
           
-          // Reset opacity for next song
+          // Keep opacity at 0% until next video loads (handled by play command)
+          
+          sendStatus(statusType, statusType === 'fadeComplete' ? 'Fade complete' : 'Skip complete', currentVideoId);
+          currentVideoId = '';
+          console.log('[Player] Fade cleanup complete, ready for next video');
+        }
+      }, fadeInterval);
+    }
+
+    function fadeInAndComplete(statusType = 'resumeComplete') {
+      console.log('[Player] Fading in with volume and opacity...');
+      
+      // Clear any existing fade timer
+      if (fadeTimer) {
+        clearInterval(fadeTimer);
+        fadeTimer = null;
+      }
+      
+      // Clear test mode timeout if exists
+      if (testModeTimeout) {
+        clearTimeout(testModeTimeout);
+        testModeTimeout = null;
+      }
+      
+      const currentVolume = player.getVolume();
+      const targetVolume = currentVolume > 50 ? currentVolume : 100; // Use current if already high, otherwise assume 100
+      const playerElement = document.getElementById('player');
+      const fadeSteps = 40; // 40 steps * 50ms = 2 seconds
+      const fadeInterval = 50; // ms per step
+      let currentStep = 0;
+      
+      // Start playback immediately
+      player.playVideo();
+      
+      fadeTimer = setInterval(() => {
+        currentStep++;
+        const progress = currentStep / fadeSteps;
+        
+        // Fade volume from 0 to targetVolume
+        const newVolume = targetVolume * progress;
+        player.setVolume(Math.max(0, newVolume));
+        
+        // Fade opacity from 0 to 1
+        const newOpacity = progress;
+        if (playerElement) {
+          playerElement.style.opacity = Math.min(1, newOpacity);
+        }
+        
+        if (currentStep >= fadeSteps) {
+          clearInterval(fadeTimer);
+          fadeTimer = null;
+          console.log('[Player] Fade in complete, video is now playing at full volume/opacity');
+          
+          // Ensure final state
+          player.setVolume(targetVolume);
           if (playerElement) {
             playerElement.style.opacity = '1';
           }
           
-          sendStatus('fadeComplete', 'Fade complete', currentVideoId);
-          currentVideoId = '';
+          const videoData = player.getVideoData();
+          sendStatus(statusType, statusType === 'playing' ? videoData.title : 'Resume complete', currentVideoId);
+          console.log('[Player] Fade in cleanup complete');
         }
       }, fadeInterval);
     }
@@ -423,14 +781,32 @@
 
     function loadWindowPosition() {
       try {
+        // First try to load display-based window state (preferred)
+        const displayState = localStorage.getItem('PLAYER_WINDOW_STATE');
+        if (displayState) {
+          const state = JSON.parse(displayState);
+          if (state.size && state.position) {
+            window.moveTo(state.position.x, state.position.y);
+            window.resizeTo(state.size.width, state.size.height);
+            console.log('[Player] Restored display-based window position:', {
+              x: state.position.x,
+              y: state.position.y,
+              width: state.size.width,
+              height: state.size.height
+            });
+            return; // Successfully loaded display state, don't fall back to manual position
+          }
+        }
+
+        // Fallback to manually saved window position (legacy)
         const saved = localStorage.getItem('PLAYER_WINDOW_POSITION');
         if (saved) {
           const position = JSON.parse(saved);
-          if (position.x !== undefined && position.y !== undefined && 
+          if (position.x !== undefined && position.y !== undefined &&
               position.width && position.height) {
             window.moveTo(position.x, position.y);
             window.resizeTo(position.width, position.height);
-            console.log('[Player] Restored window position:', position);
+            console.log('[Player] Restored legacy window position:', position);
           }
         }
       } catch (e) {
@@ -451,19 +827,59 @@
     window.addEventListener('resize', debouncedSave);
     window.addEventListener('move', debouncedSave);
 
+    // ========== PERMISSION RESPONSE LISTENER ==========
+    window.addEventListener('message', (event) => {
+      if (event.data && event.data.type === 'permissionResponse') {
+        handlePermissionResponse(event.data.permission, event.data.granted);
+      }
+    });
+
+    // Also listen for permission responses in localStorage (backup)
+    let lastPermissionResponse = localStorage.getItem('jukeboxPermissionResponse');
+    setInterval(() => {
+      const currentResponse = localStorage.getItem('jukeboxPermissionResponse');
+      if (currentResponse !== lastPermissionResponse) {
+        lastPermissionResponse = currentResponse;
+        if (currentResponse) {
+          try {
+            const response = JSON.parse(currentResponse);
+            if (response.type === 'permissionResponse') {
+              handlePermissionResponse(response.permission, response.granted);
+              // Clear the response after processing
+              localStorage.removeItem('jukeboxPermissionResponse');
+            }
+          } catch (e) {
+            console.error('[Player] Error parsing permission response:', e);
+          }
+        }
+      }
+    }, 500);
+
     // ========== PERIODIC STATUS UPDATE ==========
     setInterval(() => {
-      if (player && isPlaying) {
+      if (player) {
         try {
-          const currentTime = player.getCurrentTime();
-          const duration = player.getDuration();
-          const videoData = player.getVideoData();
-          
-          // Send periodic update
-          sendStatus('playing', videoData.title, currentVideoId);
+          // Send periodic heartbeat to indicate player window is still alive
+          if (isPlaying) {
+            const currentTime = player.getCurrentTime();
+            const duration = player.getDuration();
+            const videoData = player.getVideoData();
+            
+            // Send playing status update
+            sendStatus('playing', videoData.title, currentVideoId);
+            console.log('[Player] Sent playing heartbeat:', videoData.title);
+          } else {
+            // Send heartbeat even when not playing to keep connection alive
+            sendStatus('ready', 'Player active');
+            console.log('[Player] Sent ready heartbeat');
+          }
         } catch (e) {
-          // Ignore errors during periodic updates
+          // Send basic heartbeat if YouTube API calls fail
+          sendStatus('ready', 'Player active');
+          console.log('[Player] Sent error heartbeat');
         }
+      } else {
+        console.log('[Player] No player object, skipping heartbeat');
       }
     }, 5000);
 

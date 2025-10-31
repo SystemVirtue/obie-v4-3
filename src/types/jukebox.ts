@@ -34,6 +34,7 @@ export interface QueuedRequest extends Video {
 export interface PlaylistItem extends Video {
   isNowPlaying?: boolean;
   isUserRequest?: boolean;
+  isAlreadyPlayed?: boolean;
 }
 
 /**
@@ -52,6 +53,39 @@ export interface BackgroundFile {
   name: string;
   url: string;
   type: "image" | "video";
+}
+
+/**
+ * Background queue item for playback sequencing
+ */
+export interface BackgroundQueueItem {
+  id: string;
+  assetId: string; // References BackgroundFile.id or default asset
+  name: string;
+  type: "default" | "image" | "video";
+  url?: string; // Only for custom assets
+  settings?: {
+    scaling?: 'Original Size' | 'Fit-To-Screen' | 'Fill-Screen' | 'Stretch to Screen';
+    fadeInOut?: 'No Fade' | '0.5s' | '1.0s' | '1.5s' | '2.0s' | '2.5s' | '3.0s';
+    // Image-specific settings
+    displayDuration?: 'Random Fast' | 'Random Slow' | '15s' | '30s' | '45s' | '1 Minute';
+    imageMotion?: 'None' | 'Soft Ken Burns' | 'Extreme Ken Burns' | 'Circular Loops' | 'Edge Reflections Cycle' | 'Zoom Wave';
+    // Video-specific settings
+    videoSpeed?: '0.25' | '0.5' | '0.75' | '1.0' | '1.25' | '1.5' | '1.75' | '2.0';
+    direction?: '>> Forwards >>' | '<< Backwards <<';
+  };
+}
+
+/**
+ * Background playback settings
+ */
+export interface BackgroundSettings {
+  fitAssetsToScreen: boolean;
+  dipToBlackFade: boolean;
+  bounceVideos: boolean;
+  videoPlaybackSpeed: number;
+  videoLoopRepeat: number;
+  imageDisplayTime: number;
 }
 
 // ============================================================================
@@ -149,9 +183,15 @@ export interface JukeboxUIState {
   pendingDisplayInfo: any | null;
   showSkipConfirmation: boolean;
   showApiKeyTestDialog: boolean;
+  showDisplaySelectionDialog: boolean;
   
   // Display settings
   showMiniPlayer: boolean;
+
+  // Playlist import loading
+  isImportingPlaylist: boolean;
+  importProgress: number;
+  importError: string | null;
 }
 
 /**
@@ -173,6 +213,7 @@ export interface JukeboxConfigState {
   maxSongLength: number;
   testMode: boolean;
   videoQuality: "auto" | "hd1080" | "hd720" | "large" | "medium" | "small";
+  adaptiveQualityEnabled: boolean;
   hideEndCards: boolean;
   
   // Coin acceptor configuration
@@ -186,12 +227,22 @@ export interface JukeboxConfigState {
   cycleBackgrounds: boolean;
   bounceVideos: boolean;
   backgroundCycleIndex: number;
+  backgroundQueue: BackgroundQueueItem[];
+  backgroundQueueIndex: number;
+  backgroundSettings: BackgroundSettings;
+  bgVisualMode: 'random' | 'images-only' | 'videos-only' | 'custom-queue';
+  
+  // Background testing state
+  isTestingBackgroundQueue: boolean;
+  currentTestIndex: number;
 
   // Display configuration
   selectedDisplay: string;
   useFullscreen: boolean;
   autoDetectDisplay: boolean;
+  showDisplaySelectionDialogOnStartup: boolean;
   playerWindowPosition: { x: number; y: number; width: number; height: number } | null;
+  userDefaultPlayerDisplay: { displayId: string; fullscreen: boolean; position?: { x: number; y: number; width: number; height: number } } | null;
 }
 
 /**
@@ -210,8 +261,10 @@ export interface JukeboxPlaylistState {
 export interface JukeboxRuntimeState {
   playerWindow: Window | null;
   isPlayerRunning: boolean;
+  playerStatus: { state: number; description: string; timestamp: number } | null;
   isAppPaused: boolean;
   allKeysExhausted: boolean;
+  lastPlayingId: string;
 }
 
 /**
@@ -337,13 +390,21 @@ export interface UserPreferences {
   showMiniPlayer: boolean;
   testMode: boolean;
   videoQuality: "auto" | "hd1080" | "hd720" | "large" | "medium" | "small";
+  adaptiveQualityEnabled: boolean;
   hideEndCards: boolean;
   coinValueA: number;
   coinValueB: number;
   selectedDisplay: string;
   useFullscreen: boolean;
   autoDetectDisplay: boolean;
+  showDisplaySelectionDialogOnStartup: boolean;
   playerWindowPosition: { x: number; y: number; width: number; height: number } | null;
+  userDefaultPlayerDisplay: { displayId: string; fullscreen: boolean; position?: { x: number; y: number; width: number; height: number } } | null;
+  backgrounds: BackgroundFile[];
+  backgroundQueue: BackgroundQueueItem[];
+  backgroundQueueIndex: number;
+  backgroundSettings: BackgroundSettings;
+  bgVisualMode: 'random' | 'images-only' | 'videos-only' | 'custom-queue';
 }
 
 

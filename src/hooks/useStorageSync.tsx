@@ -54,6 +54,8 @@ export const useStorageSync = ({
   // Use refs to access latest values without triggering re-renders
   const stateRef = useRef(state);
   const handleVideoEndedRef = useRef(handleVideoEnded);
+  const lastHeartbeatRef = useRef<number>(Date.now());
+  const heartbeatTimeoutRef = useRef<NodeJS.Timeout>();
 
   // Keep refs updated
   useEffect(() => {
@@ -64,9 +66,18 @@ export const useStorageSync = ({
     handleVideoEndedRef.current = handleVideoEnded;
   }, [handleVideoEnded]);
 
+  // Clear heartbeat timeout when player stops running
+  useEffect(() => {
+    if (!state.isPlayerRunning && heartbeatTimeoutRef.current) {
+      console.log("[StorageSync] Player stopped running, clearing heartbeat timeout");
+      clearTimeout(heartbeatTimeoutRef.current);
+      heartbeatTimeoutRef.current = undefined;
+    }
+  }, [state.isPlayerRunning]);
+
   /**
    * Handle storage change events from player window
-   * Processes jukeboxStatus and jukeboxCommand events
+   * Processes jukeboxStatus events
    */
   const handleStorageChange = useCallback(
     (event: StorageEvent) => {
@@ -75,6 +86,27 @@ export const useStorageSync = ({
         try {
           const status = JSON.parse(event.newValue);
           const currentState = stateRef.current;
+          
+          console.log("[StorageSync] Received heartbeat:", status, "isPlayerRunning:", currentState.isPlayerRunning);
+          
+          // Update last heartbeat timestamp for any status message
+          lastHeartbeatRef.current = Date.now();
+          
+          // Only set heartbeat timeout if player is supposed to be running
+          if (currentState.isPlayerRunning) {
+            // Clear any existing heartbeat timeout
+            if (heartbeatTimeoutRef.current) {
+              console.log("[StorageSync] Clearing existing heartbeat timeout");
+              clearTimeout(heartbeatTimeoutRef.current);
+            }
+            
+            // Set new heartbeat timeout (10 seconds - slightly longer than player heartbeat interval)
+            heartbeatTimeoutRef.current = setTimeout(() => {
+              console.log("[StorageSync] Player heartbeat timeout - checking if player window is still responsive");
+            }, 10000);
+          } else {
+            console.log("[StorageSync] Player not running, ignoring heartbeat timeout");
+          }
           
           // Only log in development to reduce console noise
           if (process.env.NODE_ENV === 'development') {
@@ -86,21 +118,30 @@ export const useStorageSync = ({
           if (status.status === "playing" && status.title && status.videoId) {
             const cleanTitle = status.title.replace(/\([^)]*\)/g, "").trim();
             
-            if (process.env.NODE_ENV === 'development') {
-              console.log("[StorageSync] Updating currently playing:", cleanTitle, "VideoID:", status.videoId);
-            }
-            
-            setState((prev) => ({
-            ...prev,
-            currentlyPlaying: cleanTitle,
-            currentVideoId: status.videoId,
-          }));
+            // Check if this is a new song (different from last playing)
+            if (cleanTitle !== currentState.lastPlayingId) {
+              if (process.env.NODE_ENV === 'development') {
+                console.log("[StorageSync] New song detected. Updating currently playing:", cleanTitle, "VideoID:", status.videoId);
+                console.log("[StorageSync] Previous lastPlayingId:", currentState.lastPlayingId);
+              }
+              
+              setState((prev) => ({
+                ...prev,
+                lastPlayingId: prev.currentlyPlaying, // Store current as last playing before updating
+                currentlyPlaying: cleanTitle,
+                currentVideoId: status.videoId,
+              }));
 
-          // Force UI update for coming up titles
-          setTimeout(() => {
-            setState((prev) => ({ ...prev }));
-          }, 100);
-        }
+              // Force UI update for coming up titles
+              setTimeout(() => {
+                setState((prev) => ({ ...prev }));
+              }, 100);
+            } else {
+              if (process.env.NODE_ENV === 'development') {
+                console.log("[StorageSync] Ignoring duplicate song status:", cleanTitle, "VideoID:", status.videoId);
+              }
+            }
+          }
 
         // Handle video ended or test mode complete
         if (status.status === "ended" || status.status === "testModeComplete") {
@@ -143,7 +184,7 @@ export const useStorageSync = ({
           }
         }
 
-        // Handle fade complete (skip with fade animation)
+        // Handle fade complete (natural end of song)
         if (status.status === "fadeComplete") {
           const statusVideoId = status.id;
           console.log("[StorageSync] Fade complete. Status ID:", statusVideoId);
@@ -178,6 +219,52 @@ export const useStorageSync = ({
                 return currentState;
               });
             }, 10000);
+          }
+        }
+
+        // Handle skip complete (manual skip with fade)
+        if (status.status === "skipComplete") {
+          const statusVideoId = status.id;
+          console.log("[StorageSync] Skip complete. Status ID:", statusVideoId);
+
+          // For skips, just update the UI state but don't trigger handleVideoEnded
+          // The performSkip function already handles playing the next song
+          if (statusVideoId && statusVideoId === currentState.currentVideoId) {
+            console.log("[StorageSync] Skip complete for current video");
+            
+            setState((prev) => ({
+              ...prev,
+              currentlyPlaying: "Loading...",
+              currentVideoId: "",
+            }));
+          }
+        }
+
+        // Handle pause complete (pause with fade)
+        if (status.status === "pauseComplete") {
+          const statusVideoId = status.id;
+          console.log("[StorageSync] Pause complete. Status ID:", statusVideoId);
+
+          // For pauses, just log the completion - no state changes needed
+          // The pause command already set isPlayerPaused: true
+          if (statusVideoId && statusVideoId === currentState.currentVideoId) {
+            console.log("[StorageSync] Pause complete for current video, video is now faded out and paused");
+          } else {
+            console.log("[StorageSync] Video ID mismatch for pause, ignoring");
+          }
+        }
+
+        // Handle resume complete (resume with fade)
+        if (status.status === "resumeComplete") {
+          const statusVideoId = status.id;
+          console.log("[StorageSync] Resume complete. Status ID:", statusVideoId);
+
+          // For resumes, just log the completion - no state changes needed
+          // The resume command already set isPlayerPaused: false
+          if (statusVideoId && statusVideoId === currentState.currentVideoId) {
+            console.log("[StorageSync] Resume complete for current video, video is now playing");
+          } else {
+            console.log("[StorageSync] Video ID mismatch for resume, ignoring");
           }
         }
 
@@ -288,6 +375,9 @@ export const useStorageSync = ({
     return () => {
       window.removeEventListener("storage", handleStorageChange);
       clearInterval(pollInterval);
+      if (heartbeatTimeoutRef.current) {
+        clearTimeout(heartbeatTimeoutRef.current);
+      }
     };
   }, [handleStorageChange]);
 

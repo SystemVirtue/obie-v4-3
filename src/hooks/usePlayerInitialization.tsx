@@ -17,8 +17,8 @@ import { JukeboxFullState } from "@/types/jukebox";
 
 export interface UsePlayerInitializationOptions {
   state: JukeboxFullState;
-  initializePlayer: () => Promise<void>;
   playNextSong: () => void;
+  showDisplaySelectionDialog: () => void;
 }
 
 /**
@@ -31,15 +31,14 @@ export interface UsePlayerInitializationOptions {
  * ```tsx
  * usePlayerInitialization({
  *   state: jukebox.state,
- *   initializePlayer: jukebox.player.initializePlayer,
  *   playNextSong: playlistManager.playNextSong
  * });
  * ```
  */
 export const usePlayerInitialization = ({
   state,
-  initializePlayer,
   playNextSong,
+  showDisplaySelectionDialog,
 }: UsePlayerInitializationOptions): void => {
   // Track if we've already started the first song to prevent multiple triggers
   const hasStartedFirstSongRef = useRef(false);
@@ -97,20 +96,23 @@ export const usePlayerInitialization = ({
           state.playerWindow.closed ||
           !state.isPlayerRunning;
 
-        if (needsPlayerInit) {
-          console.log("[PlayerInit] Player window closed/not running, initializing...");
+        // Skip player initialization if mini player mode is active
+        if (state.showMiniPlayer) {
+          console.log("[PlayerInit] Mini player mode active, skipping window initialization");
+          // Still start the song since the embedded player will handle it
+          setTimeout(() => playNextSong(), 0);
+        } else if (needsPlayerInit) {
+          console.log("[PlayerInit] Player window closed/not running");
 
-          initializePlayer()
-            .then(() => {
-              // After player initializes, start the song with a brief delay
-              setTimeout(() => playNextSong(), 1000);
-            })
-            .catch((error) => {
-              console.error("[PlayerInit] Failed to initialize player:", error);
-              console.log("[PlayerInit] Starting song anyway");
-              // Try to start song even if initialization failed
-              setTimeout(() => playNextSong(), 0);
-            });
+          // Check if we should show display selection dialog on startup
+          if (state.showDisplaySelectionDialogOnStartup) {
+            console.log("[PlayerInit] Showing display selection dialog on startup");
+            showDisplaySelectionDialog();
+          } else {
+            console.log("[PlayerInit] Player initialization needed but delegating to auto-init system");
+            // Don't call initializePlayer() here - let the auto-init system in Index.tsx handle it
+            // This prevents duplicate initialization calls
+          }
         } else {
           // Player is ready, start immediately
           console.log("[PlayerInit] Player ready, starting song immediately");
@@ -131,7 +133,6 @@ export const usePlayerInitialization = ({
     state.isPlayerPaused,
     state.playerWindow,
     state.currentlyPlaying,
-    initializePlayer,
     playNextSong,
   ]);
 

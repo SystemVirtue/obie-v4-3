@@ -15,6 +15,10 @@ export default function Admin() {
     addUserRequest,
     addCreditHistory,
     handleBackgroundUpload,
+    handleAddToBackgroundQueue,
+    handleRemoveFromBackgroundQueue,
+    handleReorderBackgroundQueue,
+    handleBackgroundSettingsChange,
     getCurrentPlaylistForDisplay,
   } = useJukeboxState();
 
@@ -125,12 +129,19 @@ export default function Admin() {
         onBounceVideosChange={(bounce) =>
           setState((prev) => ({ ...prev, bounceVideos: bounce }))
         }
+        backgroundQueue={state.backgroundQueue}
+        onAddToBackgroundQueue={handleAddToBackgroundQueue}
+        onRemoveFromBackgroundQueue={handleRemoveFromBackgroundQueue}
+        onReorderBackgroundQueue={handleReorderBackgroundQueue}
+        backgroundSettings={state.backgroundSettings}
+        onBackgroundSettingsChange={handleBackgroundSettingsChange}
         onBackgroundUpload={handleBackgroundUpload}
         onAddLog={addLog}
         onAddUserRequest={addUserRequest}
         onAddCreditHistory={addCreditHistory}
         playerWindow={state.playerWindow}
         isPlayerRunning={state.isPlayerRunning}
+        isPlayerPaused={state.isPlayerPaused}
         onPlayerToggle={handlePlayerToggle}
         onSkipSong={handleSkipSong}
         onInitializePlayer={initializePlayer}
@@ -160,6 +171,34 @@ export default function Admin() {
         coinValueB={state.coinValueB}
         onCoinValueBChange={(value) =>
           setState((prev) => ({ ...prev, coinValueB: value }))
+        }
+        videoQuality={state.videoQuality}
+        onVideoQualityChange={(quality) =>
+          setState((prev) => ({ ...prev, videoQuality: quality }))
+        }
+        hideEndCards={state.hideEndCards}
+        onHideEndCardsChange={(hide) =>
+          setState((prev) => ({ ...prev, hideEndCards: hide }))
+        }
+        adaptiveQualityEnabled={state.adaptiveQualityEnabled}
+        onAdaptiveQualityEnabledChange={(enabled) =>
+          setState((prev) => ({ ...prev, adaptiveQualityEnabled: enabled }))
+        }
+        selectedDisplay={state.selectedDisplay}
+        onSelectedDisplayChange={(display) =>
+          setState((prev) => ({ ...prev, selectedDisplay: display, autoDetectDisplay: false }))
+        }
+        useFullscreen={state.useFullscreen}
+        onUseFullscreenChange={(fullscreen) =>
+          setState((prev) => ({ ...prev, useFullscreen: fullscreen }))
+        }
+        autoDetectDisplay={state.autoDetectDisplay}
+        onAutoDetectDisplayChange={(autoDetect) =>
+          setState((prev) => ({ ...prev, autoDetectDisplay: autoDetect }))
+        }
+        showDisplaySelectionDialogOnStartup={state.showDisplaySelectionDialogOnStartup}
+        onShowDisplaySelectionDialogOnStartupChange={(show) =>
+          setState((prev) => ({ ...prev, showDisplaySelectionDialogOnStartup: show }))
         }
       />
     </div>

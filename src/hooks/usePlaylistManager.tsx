@@ -1,6 +1,8 @@
 import { JukeboxState, PlaylistItem, LogEntry } from "./useJukeboxState";
 import { youtubeQuotaService } from "@/services/youtube/api";
 import { youtubeHtmlParserService } from "@/services/youtube/scraper";
+import { youtubeAPIClient } from "@/services/youtube/api/client";
+import { handlePlaylistError, handleApiError, handleNetworkError } from "@/utils/errorHandler";
 import React from "react"; // Import React to use useRef and useCallback
 
 export const usePlaylistManager = (
@@ -23,6 +25,7 @@ export const usePlaylistManager = (
   // At the top of the usePlaylistManager function, after the parameters
   const lastPlayedVideoId = React.useRef<string | null>(null);
   const isPlayingNext = React.useRef<boolean>(false);
+  const [isImportingPlaylist, setIsImportingPlaylist] = React.useState<boolean>(false);
 
   const loadPlaylistVideos = async (playlistId: string) => {
     // Global guard: prevent any playlist loading if we're in a bad state
@@ -198,76 +201,34 @@ export const usePlaylistManager = (
           break;
         }
 
-        // Simple fetch approach with comprehensive error handling
+        // Use cached YouTube API client instead of direct fetch
         let data;
         try {
           console.log(
-            `[LoadPlaylist] Making request to YouTube API (attempt after ${failures} previous failures)...`,
+            `[LoadPlaylist] Making cached request to YouTube API (attempt after ${failures} previous failures)...`,
           );
 
-          const response = await fetch(url, {
-            method: "GET",
-            headers: {
-              Accept: "application/json",
+          // Use the cached API client instead of direct fetch
+          const response = await youtubeAPIClient.makeRequest(
+            'playlistItems',
+            {
+              part: 'snippet',
+              playlistId: playlistId,
+              maxResults: '50',
+              ...(nextPageToken && { pageToken: nextPageToken }),
             },
-            // Add cache control and timeout
-            cache: "no-cache",
-            signal: AbortSignal.timeout(10000), // 10 second timeout
-          });
+            state.apiKey
+          );
 
-          console.log(`[LoadPlaylist] Response status: ${response.status}`);
-
-          if (!response.ok) {
-            if (response.status === 403) {
-              console.log(
-                "[LoadPlaylist] Quota exceeded, using fallback playlist",
-              );
-              // Set flag to prevent future API calls until reset
-              const quotaExhaustedKey = `quota-exhausted-${state.apiKey.slice(-8)}`;
-              localStorage.setItem(quotaExhaustedKey, Date.now().toString());
-
-              toast({
-                title: "Quota Exceeded - Auto-opening Admin Panel",
-                description:
-                  "YouTube API quota exceeded. Opening admin panel for configuration.",
-                variant: "default",
-              });
-
-              // Don't auto-open admin - API key test dialog already handled this
-
-              allVideos = []; // Trigger fallback
-              break;
-            } else if (response.status === 404) {
-              console.log("[LoadPlaylist] Playlist not found, using fallback");
-              toast({
-                title: "Playlist Not Found",
-                description:
-                  "The playlist could not be found. Using fallback playlist.",
-                variant: "default",
-              });
-              allVideos = []; // Trigger fallback
-              break;
-            } else {
-              console.error(`[LoadPlaylist] HTTP ${response.status} error`);
-              toast({
-                title: "API Error",
-                description: `YouTube API error (${response.status}). Using fallback playlist.`,
-                variant: "default",
-              });
-              allVideos = []; // Trigger fallback for any error
-              break;
-            }
-          }
-
-          console.log("[LoadPlaylist] Parsing JSON response...");
-          data = await response.json();
+          data = response;
+          console.log(`[LoadPlaylist] Response received from cached API client`);
           console.log(
             `[LoadPlaylist] Received ${data.items?.length || 0} items`,
           );
 
-          // Track API usage
+          // Track API usage (only if not from cache)
           youtubeQuotaService.trackApiUsage(state.apiKey, "playlistItems", 1);
-        } catch (error: any) { // Explicitly type error as 'any' for better error handling
+        } catch (error: any) {
           // Track failures for future reference
           const failureKey = `playlist-fetch-failures-${playlistId}`;
           const currentFailures =
@@ -663,42 +624,57 @@ export const usePlaylistManager = (
   const handleDefaultPlaylistChange = async (playlistId: string) => {
     console.log("[PlaylistManager] Playlist selection changed to:", playlistId);
     
-    // Validate playlist URL/ID before proceeding
-    const { validatePlaylistUrl } = await import('@/utils/playlistValidator');
-    const validation = validatePlaylistUrl(playlistId);
+    // Set loading state
+    setIsImportingPlaylist(true);
     
-    if (!validation.isValid) {
-      console.error("[PlaylistManager] Invalid playlist URL:", validation.error);
+    const { validatePlaylistUrl } = await import('@/utils/playlistValidator');
+    
+    try {
+      const validation = validatePlaylistUrl(playlistId);
+      
+      if (!validation.isValid) {
+        console.error("[PlaylistManager] Invalid playlist URL:", validation.error);
+        toast({
+          title: "Invalid Playlist",
+          description: validation.error || "Please enter a valid YouTube playlist URL or ID",
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      const validatedId = validation.playlistId!;
+      console.log("[PlaylistManager] Validated playlist ID:", validatedId);
+      
+      // Update state with new playlist ID
+      setState((prev) => ({ ...prev, defaultPlaylist: validatedId }));
+      
+      // Save to localStorage immediately (remove duplicate active_playlist_url)
+      localStorage.setItem('USER_PREFERENCES', JSON.stringify({
+        ...JSON.parse(localStorage.getItem('USER_PREFERENCES') || '{}'),
+        defaultPlaylist: validatedId
+      }));
+      
+      // Load the playlist immediately (this will update the queue, not interrupt current song)
+      await loadPlaylistVideos(validatedId);
+      
+      // Reset current video index to start of new playlist
+      setState((prev) => ({ ...prev, currentVideoIndex: 0 }));
+      
       toast({
-        title: "Invalid Playlist",
-        description: validation.error || "Please enter a valid YouTube playlist URL or ID",
+        title: "Playlist Changed",
+        description: "Queue updated with new playlist",
+      });
+    } catch (error) {
+      console.error("[PlaylistManager] Error loading playlist:", error);
+      toast({
+        title: "Playlist Load Failed",
+        description: "Failed to load the selected playlist. Please try again.",
         variant: "destructive",
       });
-      return;
+    } finally {
+      // Reset loading state
+      setIsImportingPlaylist(false);
     }
-    
-    const validatedId = validation.playlistId!;
-    console.log("[PlaylistManager] Validated playlist ID:", validatedId);
-    
-    // Update state with new playlist ID
-    setState((prev) => ({ ...prev, defaultPlaylist: validatedId }));
-    
-    // Save to localStorage immediately (remove duplicate active_playlist_url)
-    localStorage.setItem('USER_PREFERENCES', JSON.stringify({
-      ...JSON.parse(localStorage.getItem('USER_PREFERENCES') || '{}'),
-      defaultPlaylist: validatedId
-    }));
-    
-    // Load the playlist immediately (this will update the queue, not interrupt current song)
-    await loadPlaylistVideos(validatedId);
-    
-    // Reset current video index to start of new playlist
-    setState((prev) => ({ ...prev, currentVideoIndex: 0 }));
-    
-    toast({
-      title: "Playlist Changed",
-      description: "Queue updated with new playlist",
-    });
   };
 
   const handlePlaylistReorder = (newPlaylist: PlaylistItem[]) => {
@@ -721,7 +697,7 @@ export const usePlaylistManager = (
       ? [currentSong, ...shuffledRemaining]
       : shuffledRemaining;
 
-    setState((prev) => ({ ...prev, inMemoryPlaylist: newPlaylist, currentVideoIndex: 0 }));
+    setState((prev) => ({ ...prev, inMemoryPlaylist: newPlaylist, currentVideoIndex: currentSong ? 1 : 0 }));
     
     // Save shuffled playlist to localStorage
     try {
@@ -750,5 +726,6 @@ export const usePlaylistManager = (
     handlePlaylistReorder,
     handlePlaylistShuffle,
     shufflePlaylist: handlePlaylistShuffle,
+    isImportingPlaylist,
   };
 };

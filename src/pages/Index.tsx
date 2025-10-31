@@ -33,12 +33,17 @@ import { CreditsDisplay } from "@/components/CreditsDisplay";
 import { DisplayConfirmationDialog } from "@/components/DisplayConfirmationDialog";
 import { QuotaExhaustedDialog } from "@/components/QuotaExhaustedDialog";
 import { ApiKeyTestDialog } from "@/components/ApiKeyTestDialog";
-import { NowPlayingTicker } from "@/components/NowPlayingTicker";
-import { PlayerClosedNotification } from "@/components/PlayerClosedNotification";
+import { PlaylistImportPopover } from "@/components/PlaylistImportPopover";
+import {
+  NowPlayingTicker,
+  PlayerStatusDisplay,
+} from "@/components/NowPlayingTicker";
 import { MiniPlayer } from "@/components/MiniPlayer";
 import { SearchButton } from "@/components/SearchButton";
 import { UpcomingQueue } from "@/components/UpcomingQueue";
 import { FooterControls } from "@/components/FooterControls";
+import { DisplaySelectionDialog } from "@/components/DisplaySelectionDialog";
+import { PermissionDialog } from "@/components/PermissionDialog";
 import { useDisplayConfirmation } from "@/hooks/useDisplayConfirmation";
 import { useStorageSync } from "@/hooks/useStorageSync";
 import { usePlayerInitialization } from "@/hooks/usePlayerInitialization";
@@ -46,6 +51,7 @@ import type { DisplayInfo } from "@/types/jukebox";
 import { youtubeQuotaService } from "@/services/youtube/api";
 import { shouldTestApiKeys } from "@/utils/apiKeyValidator";
 import { useAppInitialization } from "@/hooks/useAppInitialization";
+import { apiKeyRotation } from "@/services/youtube/api/keyRotation";
 
 function Index() {
   const { toast } = useToast();
@@ -73,11 +79,14 @@ function Index() {
       }
     }
     
-    toast({
-      title: "LocalStorage Updated",
-      description: `Updated: ${key}${changeDetails}`,
-      duration: 2000,
-    });
+    // Defer toast to next tick to avoid setState during render
+    setTimeout(() => {
+      toast({
+        title: "LocalStorage Updated",
+        description: `Updated: ${key}${changeDetails}`,
+        duration: 2000,
+      });
+    }, 0);
   };
 
   const {
@@ -87,7 +96,13 @@ function Index() {
     addUserRequest,
     addCreditHistory,
     handleBackgroundUpload,
-    getUpcomingTitles,
+    handleAddToBackgroundQueue,
+    handleRemoveFromBackgroundQueue,
+    handleReorderBackgroundQueue,
+    handleUpdateBackgroundQueueItem,
+    handleTestBackgroundQueue,
+    handleBackgroundSettingsChange,
+    upcomingTitles,
     isCurrentSongUserRequest,
     getCurrentPlaylistForDisplay,
   } = useJukeboxState();
@@ -117,6 +132,7 @@ function Index() {
     handleDefaultPlaylistChange,
     handlePlaylistReorder,
     handlePlaylistShuffle,
+    isImportingPlaylist,
   } = usePlaylistManager(state, setState, addLog, playSong, toast);
 
   // Storage synchronization hook (player window communication)
@@ -131,8 +147,8 @@ function Index() {
   // Player initialization hook (auto-start first song)
   usePlayerInitialization({
     state,
-    initializePlayer,
     playNextSong,
+    showDisplaySelectionDialog: () => setState(prev => ({ ...prev, showDisplaySelectionDialog: true })),
   });
 
   const {
@@ -160,6 +176,105 @@ function Index() {
       youtubeQuotaService.setAllKeysExhaustedCallback(null);
     };
   }, [handleAllKeysExhausted]);
+
+  // Permission dialog state
+  const [permissionDialogState, setPermissionDialogState] = useState<{
+    isOpen: boolean;
+    permissionType: 'autoplay' | 'fullscreen' | null;
+  }>({
+    isOpen: false,
+    permissionType: null,
+  });
+
+  // Permission dialog handlers
+  const handlePermissionGranted = useCallback((permissionType: 'autoplay' | 'fullscreen') => {
+    console.log(`[Permissions] ${permissionType} permission granted`);
+    
+    // Send response back to player window
+    const response = {
+      type: 'permissionResponse',
+      permission: permissionType,
+      granted: true,
+    };
+    
+    // Try to send to player window
+    if (state.playerWindow && !state.playerWindow.closed) {
+      state.playerWindow.postMessage(response, '*');
+    }
+    
+    // Also store in localStorage as backup
+    localStorage.setItem('jukeboxPermissionResponse', JSON.stringify(response));
+    
+    // Close dialog
+    setPermissionDialogState({ isOpen: false, permissionType: null });
+  }, [state.playerWindow]);
+
+  const handlePermissionDenied = useCallback((permissionType: 'autoplay' | 'fullscreen') => {
+    console.log(`[Permissions] ${permissionType} permission denied`);
+    
+    // Send response back to player window
+    const response = {
+      type: 'permissionResponse',
+      permission: permissionType,
+      granted: false,
+    };
+    
+    // Try to send to player window
+    if (state.playerWindow && !state.playerWindow.closed) {
+      state.playerWindow.postMessage(response, '*');
+    }
+    
+    // Also store in localStorage as backup
+    localStorage.setItem('jukeboxPermissionResponse', JSON.stringify(response));
+    
+    // Close dialog
+    setPermissionDialogState({ isOpen: false, permissionType: null });
+  }, [state.playerWindow]);
+
+  // Listen for permission requests from player window
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data && event.data.type === 'permissionRequest') {
+        console.log('[Permissions] Received permission request:', event.data);
+        setPermissionDialogState({
+          isOpen: true,
+          permissionType: event.data.permission,
+        });
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    
+    // Also check localStorage for permission requests (polling fallback)
+    const checkForPermissionRequests = () => {
+      const requestStr = localStorage.getItem('jukeboxPermissionRequest');
+      if (requestStr) {
+        try {
+          const request = JSON.parse(requestStr);
+          if (request.type === 'permissionRequest') {
+            console.log('[Permissions] Found permission request in localStorage:', request);
+            setPermissionDialogState({
+              isOpen: true,
+              permissionType: request.permission,
+            });
+            // Clear the request
+            localStorage.removeItem('jukeboxPermissionRequest');
+          }
+        } catch (e) {
+          console.error('[Permissions] Error parsing permission request:', e);
+        }
+      }
+    };
+    
+    // Check immediately and then poll
+    checkForPermissionRequests();
+    const interval = setInterval(checkForPermissionRequests, 1000);
+    
+    return () => {
+      window.removeEventListener('message', handleMessage);
+      clearInterval(interval);
+    };
+  }, []);
 
   // Handle quota exhausted dialog OK click
   const handleQuotaExhaustedOk = useCallback(() => {
@@ -318,18 +433,32 @@ function Index() {
     handleVideoEndedRef.current = handleVideoEnded;
   }, [handleVideoEnded]);
 
-  // Use background manager hook
-  const { getCurrentBackground } = useBackgroundManager({
-    backgrounds: state.backgrounds,
-    selectedBackground: state.selectedBackground,
-    cycleBackgrounds: state.cycleBackgrounds,
-    backgroundCycleIndex: state.backgroundCycleIndex,
-    bounceVideos: state.bounceVideos,
-    onBackgroundCycleIndexChange: (index) =>
-      setState((prev) => ({ ...prev, backgroundCycleIndex: index })),
-    onSelectedBackgroundChange: (id) =>
-      setState((prev) => ({ ...prev, selectedBackground: id })),
-  });
+  // Use background manager hook - conditionally use queue mode based on bgVisualMode
+  const { getCurrentBackground } = useBackgroundManager(
+    state.bgVisualMode === 'custom-queue'
+      ? {
+          backgrounds: state.backgrounds,
+          backgroundQueue: state.backgroundQueue,
+          backgroundSettings: state.backgroundSettings,
+          onBackgroundQueueIndexChange: (index) =>
+            setState((prev) => ({ ...prev, backgroundQueueIndex: index })),
+          backgroundQueueIndex: state.backgroundQueueIndex,
+          bgVisualMode: state.bgVisualMode,
+        }
+      : {
+          backgrounds: state.backgrounds,
+          selectedBackground: state.selectedBackground,
+          cycleBackgrounds: state.cycleBackgrounds,
+          backgroundCycleIndex: state.backgroundCycleIndex,
+          bounceVideos: state.bounceVideos,
+          backgroundSettings: state.backgroundSettings,
+          onBackgroundCycleIndexChange: (index) =>
+            setState((prev) => ({ ...prev, backgroundCycleIndex: index })),
+          onSelectedBackgroundChange: (id) =>
+            setState((prev) => ({ ...prev, selectedBackground: id })),
+          bgVisualMode: state.bgVisualMode,
+        }
+  );
 
   // Use serial communication hook with new props
   useSerialCommunication({
@@ -446,16 +575,41 @@ function Index() {
       }
     }
 
+    // Check if user needs to select a display first
+    // Show dialog if showDisplaySelectionDialogOnStartup is enabled (AutoOpenPlayer is FALSE)
+    const needsDisplaySelection = state.showDisplaySelectionDialogOnStartup;
+
+    console.log("[Auto-init] Display selection check:", {
+      userDefaultPlayerDisplay: state.userDefaultPlayerDisplay,
+      showDisplaySelectionDialogOnStartup: state.showDisplaySelectionDialogOnStartup,
+      needsDisplaySelection
+    });
+
+    if (needsDisplaySelection) {
+      console.log("[Auto-init] User needs to select display first, showing dialog");
+      setState((prev) => ({ ...prev, showDisplaySelectionDialog: true }));
+      return;
+    }
+
     if (
       state.defaultPlaylistVideos.length > 0 &&
       (!state.playerWindow || state.playerWindow.closed) &&
       !state.isPlayerRunning &&
+      !state.showMiniPlayer &&
       shouldAutoInit
     ) {
       console.log(
-        "[Auto-init] Playlist loaded with",
-        state.defaultPlaylistVideos.length,
-        "videos. Initializing player...",
+        "[Auto-init] ALL CONDITIONS MET - Initializing player:",
+        {
+          playlistLength: state.defaultPlaylistVideos.length,
+          hasPlayerWindow: !!state.playerWindow,
+          windowClosed: state.playerWindow?.closed,
+          isPlayerRunning: state.isPlayerRunning,
+          showMiniPlayer: state.showMiniPlayer,
+          shouldAutoInit,
+          userDefaultPlayerDisplay: !!state.userDefaultPlayerDisplay,
+          showDisplaySelectionDialogOnStartup: state.showDisplaySelectionDialogOnStartup
+        }
       );
 
       // Try initialization with a more permissive approach
@@ -514,7 +668,16 @@ function Index() {
       // Start with a small delay
       setTimeout(tryInitialization, 500);
     } else {
-      console.log("[Auto-init] Skipping initialization - conditions not met");
+      console.log("[Auto-init] Skipping initialization - conditions not met:", {
+        playlistLength: state.defaultPlaylistVideos.length,
+        hasPlayerWindow: !!state.playerWindow,
+        windowClosed: state.playerWindow?.closed,
+        isPlayerRunning: state.isPlayerRunning,
+        showMiniPlayer: state.showMiniPlayer,
+        shouldAutoInit,
+        userDefaultPlayerDisplay: !!state.userDefaultPlayerDisplay,
+        showDisplaySelectionDialogOnStartup: state.showDisplaySelectionDialogOnStartup
+      });
     }
   }, [
     state.defaultPlaylistVideos.length,
@@ -523,237 +686,6 @@ function Index() {
     initializePlayer,
     toast,
   ]);
-
-  // Enhanced autoplay logic - start songs when playlist is ready
-  const hasStartedFirstSongRef = useRef(false);
-  useEffect(() => {
-    // Only log in development and reduce frequency by checking if conditions actually changed
-    if (process.env.NODE_ENV === 'development') {
-      console.log("[Autoplay] Checking autoplay conditions:", {
-        inMemoryLength: state.inMemoryPlaylist.length,
-        priorityQueueLength: state.priorityQueue.length,
-        isPlayerRunning: state.isPlayerRunning,
-        isPlayerPaused: state.isPlayerPaused,
-        hasPlayerWindow: !!state.playerWindow,
-        windowClosed: state.playerWindow?.closed,
-        currentlyPlaying: state.currentlyPlaying,
-        hasStarted: hasStartedFirstSongRef.current,
-      });
-    }
-
-    if (
-      state.inMemoryPlaylist.length > 0 &&
-      state.priorityQueue.length === 0 &&
-      !state.isPlayerPaused
-    ) {
-      // Only auto-start if nothing is currently playing and not already started
-      // Also prevent autoplay if there's a player error
-      if (
-        (state.currentlyPlaying === "Loading..." ||
-          state.currentlyPlaying === "") &&
-        !hasStartedFirstSongRef.current &&
-        !state.currentlyPlaying.includes("Error")
-      ) {
-        hasStartedFirstSongRef.current = true;
-        console.log("[Autoplay] Auto-starting first song from playlist...");
-        console.log("[Autoplay] Current playlist state:", {
-          inMemoryLength: state.inMemoryPlaylist.length,
-          firstSong: state.inMemoryPlaylist[0]?.title,
-          priorityQueue: state.priorityQueue.length,
-        });
-
-        // If player window is closed or not running, try to initialize it first
-        if (
-          !state.playerWindow ||
-          state.playerWindow.closed ||
-          !state.isPlayerRunning
-        ) {
-          console.log(
-            "[Autoplay] Player window closed/not running, initializing...",
-          );
-          initializePlayer()
-            .then(() => {
-              // After player initializes, start the song
-              setTimeout(() => playNextSong(), 1000);
-            })
-            .catch(() => {
-              console.error(
-                "[Autoplay] Failed to initialize player, starting song anyway",
-              );
-              setTimeout(() => playNextSong(), 0);
-            });
-        } else {
-          // Player is ready, start immediately
-          setTimeout(() => playNextSong(), 0);
-        }
-      }
-    } else if (state.inMemoryPlaylist.length === 0) {
-      // Reset flag if playlist is empty
-      hasStartedFirstSongRef.current = false;
-    }
-  }, [
-    state.inMemoryPlaylist.length,
-    state.priorityQueue.length,
-    state.isPlayerRunning,
-    state.isPlayerPaused,
-    state.playerWindow,
-    initializePlayer,
-    playNextSong,
-  ]);
-
-  // Enhanced video end handling with proper queue management and improved sync
-  const handleStorageChange = useCallback(
-    (event: StorageEvent) => {
-      if (event.key === "jukeboxStatus" && event.newValue) {
-        const status = JSON.parse(event.newValue);
-        const currentState = stateRef.current;
-        // Only log in development to reduce console noise
-        if (process.env.NODE_ENV === 'development') {
-          console.log("[StorageEvent] Parsed status:", status);
-          console.log(
-            "[StorageEvent] Current video ID in state:",
-            currentState.currentVideoId,
-          );
-        }
-
-        // Update currently playing based on player window communication - ensure proper sync
-        if (status.status === "playing" && status.title && status.videoId) {
-          const cleanTitle = status.title.replace(/\([^)]*\)/g, "").trim();
-          
-          if (process.env.NODE_ENV === 'development') {
-            console.log(
-              "[StorageEvent] Updating currently playing to:",
-              cleanTitle,
-              "VideoID:",
-              status.videoId,
-            );
-          }
-          setState((prev) => ({
-            ...prev,
-            currentlyPlaying: cleanTitle,
-            currentVideoId: status.videoId,
-          }));
-
-          // Force update of coming up titles by triggering a state refresh
-          setTimeout(() => {
-            setState((prev) => ({ ...prev }));
-          }, 100);
-        }
-
-        // Handle video ended - ensure proper progression to next song
-        // REMOVED: This logic is now handled by useStorageSync hook to prevent double-triggering
-        // if (status.status === "ended" || status.status === "testModeComplete") {
-
-        // Handle fade complete
-        if (status.status === "fadeComplete") {
-          const statusVideoId = status.id;
-          console.log(
-            "[StorageEvent] Fade complete. Status video ID:",
-            statusVideoId,
-          );
-
-          if (statusVideoId && statusVideoId === currentState.currentVideoId) {
-            console.log(
-              "[StorageEvent] Fade complete for current video, processing autoplay",
-            );
-            setState((prev) => ({
-              ...prev,
-              currentlyPlaying: "Loading...",
-              currentVideoId: "",
-            }));
-
-            setTimeout(() => {
-              console.log(
-                "[StorageEvent] Triggering handleVideoEnded after fade",
-              );
-              handleVideoEndedRef.current();
-
-              // Force update of coming up titles after skip
-              setTimeout(() => {
-                setState((prev) => ({ ...prev }));
-              }, 500);
-            }, 500);
-
-            // Safety timeout for fade complete
-            setTimeout(() => {
-              setState((currentState) => {
-                if (currentState.currentlyPlaying === "Loading...") {
-                  console.warn(
-                    "[StorageEvent] Still loading after fade timeout, forcing next song",
-                  );
-                  handleVideoEndedRef.current();
-                  return { ...currentState, currentlyPlaying: "Recovering..." };
-                }
-                return currentState;
-              });
-            }, 10000);
-          }
-        }
-
-        // Handle video unavailable/error - auto-skip with enhanced sync
-        // REMOVED: This logic is now handled by useStorageSync hook to prevent double-triggering
-        // if (status.status === "error" || status.status === "unavailable") {
-
-        // Handle player ready status
-        if (status.status === "ready") {
-          console.log("[StorageEvent] Player window ready.");
-        }
-      }
-
-      // Listen for player window commands to track what's playing - prevent duplication
-      if (event.key === "jukeboxCommand" && event.newValue) {
-        const command = JSON.parse(event.newValue);
-        if (command.action === "play" && command.title && command.videoId) {
-          console.log(
-            "[StorageEvent] Play command detected:",
-            command.videoId,
-            command.title,
-          );
-          const cleanTitle = command.title.replace(/\([^)]*\)/g, "").trim();
-          setState((prev) => ({
-            ...prev,
-            currentlyPlaying: cleanTitle,
-            currentVideoId: command.videoId,
-          }));
-
-          // Force update of coming up titles when new song starts
-          setTimeout(() => {
-            setState((prev) => ({ ...prev }));
-          }, 100);
-        }
-      }
-    },
-    [setState, addLog],
-  );
-
-  useEffect(() => {
-    window.addEventListener("storage", handleStorageChange);
-    
-    // CRITICAL: Storage events don't fire in the same window!
-    // Add polling to detect changes from player window
-    let lastStatus = localStorage.getItem('jukeboxStatus');
-    const pollInterval = setInterval(() => {
-      const currentStatus = localStorage.getItem('jukeboxStatus');
-      if (currentStatus !== lastStatus) {
-        lastStatus = currentStatus;
-        if (currentStatus) {
-          // Simulate storage event
-          handleStorageChange({
-            key: 'jukeboxStatus',
-            newValue: currentStatus,
-            oldValue: null,
-            url: window.location.href,
-            storageArea: localStorage,
-          } as StorageEvent);
-        }
-      }
-    }, 1000); // Check every 1 second instead of 250ms
-    
-    return () => {
-      window.removeEventListener("storage", handleStorageChange);
-      clearInterval(pollInterval);
-    };
-  }, [handleStorageChange]);
 
   // Emergency recovery event listener
   useEffect(() => {
@@ -792,7 +724,12 @@ function Index() {
       );
   }, [setState, toast]);
 
-  const currentBackground = getCurrentBackground();
+  const currentBackground = getCurrentBackground() || {
+    id: 'default-black',
+    name: 'Default (Black)',
+    url: '',
+    type: 'image' as const,
+  };
 
   // Determine when to show the loading indicator
   const isLoading =
@@ -810,7 +747,12 @@ function Index() {
   return (
     <BackgroundDisplay
       background={currentBackground}
-      bounceVideos={state.bounceVideos}
+      backgroundSettings={state.backgroundSettings}
+      onVideoEnd={() => {
+        // Advance to next background in queue
+        const nextIndex = (state.backgroundQueueIndex + 1) % state.backgroundQueue.length;
+        setState((prev) => ({ ...prev, backgroundQueueIndex: nextIndex }));
+      }}
     >
       <LoadingIndicator isVisible={isLoading} />
       <CreditsDisplay credits={state.credits} mode={state.mode} />
@@ -818,11 +760,11 @@ function Index() {
         {/* Now Playing Ticker */}
         <NowPlayingTicker currentlyPlaying={state.currentlyPlaying} />
 
-        {/* Player Window Closed Warning */}
-        <PlayerClosedNotification
-          playerWindow={state.playerWindow}
+        {/* Player Status Display */}
+        <PlayerStatusDisplay 
+          playerStatus={state.playerStatus} 
           isPlayerRunning={state.isPlayerRunning}
-          onReopenPlayer={initializePlayer}
+          playerWindow={state.playerWindow}
         />
 
         {/* Credits display has been moved to the CreditsDisplay component */}
@@ -832,6 +774,7 @@ function Index() {
         <MiniPlayer
           videoId={state.currentVideoId}
           showMiniPlayer={state.showMiniPlayer}
+          isMainPlayer={state.showMiniPlayer}
         />
 
         {/* Search Button */}
@@ -848,7 +791,7 @@ function Index() {
 
         {/* Upcoming Queue */}
         <UpcomingQueue
-          upcomingTitles={getUpcomingTitles()}
+          upcomingTitles={upcomingTitles}
           testMode={state.testMode}
         />
 
@@ -1132,12 +1075,23 @@ function Index() {
         onBounceVideosChange={(bounce) =>
           setState((prev) => ({ ...prev, bounceVideos: bounce }))
         }
+        backgroundQueue={state.backgroundQueue}
+        onAddToBackgroundQueue={handleAddToBackgroundQueue}
+        onRemoveFromBackgroundQueue={handleRemoveFromBackgroundQueue}
+        onReorderBackgroundQueue={handleReorderBackgroundQueue}
+        onUpdateBackgroundQueueItem={handleUpdateBackgroundQueueItem}
+        onTestBackgroundQueue={handleTestBackgroundQueue}
+        isTestingBackgroundQueue={state.isTestingBackgroundQueue}
+        currentTestIndex={state.currentTestIndex}
+        backgroundSettings={state.backgroundSettings}
+        onBackgroundSettingsChange={handleBackgroundSettingsChange}
         onBackgroundUpload={handleBackgroundUpload}
         onAddLog={addLog}
         onAddUserRequest={addUserRequest}
         onAddCreditHistory={addCreditHistory}
         playerWindow={state.playerWindow}
         isPlayerRunning={state.isPlayerRunning}
+        isPlayerPaused={state.isPlayerPaused}
         onPlayerToggle={handlePlayerToggle}
         onSkipSong={handleSkipSong}
         onInitializePlayer={initializePlayer}
@@ -1150,16 +1104,27 @@ function Index() {
           // Update defaultPlaylist in state immediately for UI feedback
           setState((prev) => ({ ...prev, defaultPlaylist: playlistId }));
 
+          // Show import loading popover
+          setState((prev) => ({
+            ...prev,
+            isImportingPlaylist: true,
+            importProgress: 10,
+            importError: null
+          }));
+
           // Try proxy first, then fallback to YouTube Data API if needed
           let playlistItems = [];
           let usedFallback = false;
           try {
+            setState((prev) => ({ ...prev, importProgress: 25 }));
             const { youtubeProxy } = await import("@/services/youtube/proxy");
             playlistItems = await youtubeProxy.getPlaylist(playlistId);
+            setState((prev) => ({ ...prev, importProgress: 60 }));
           } catch (proxyError) {
             if (typeof window !== "undefined" && window.console) {
               console.warn("[Admin] Proxy failed, will try YouTube Data API:", proxyError);
             }
+            setState((prev) => ({ ...prev, importProgress: 40 }));
           }
 
           // If proxy failed or returned too few songs, try YouTube Data API
@@ -1167,16 +1132,38 @@ function Index() {
             usedFallback = true;
             try {
               const { youtubeAPIClient } = await import("@/services/youtube/api/client");
-              // Use the current API key from state
-              const apiKey = state.apiKey;
+
+              // Get validated API keys with available quota
+              const validKeys = await apiKeyRotation.getValidKeysWithQuota(state.customApiKey);
+
+              if (validKeys.length === 0) {
+                console.error("[Admin] No valid API keys available for playlist import");
+                setState((prev) => ({
+                  ...prev,
+                  importProgress: 0,
+                  importError: "No valid API keys available. Please check your API key configuration."
+                }));
+                return;
+              }
+
+              // Use the first valid key
+              const apiKey = validKeys[0].key;
+              console.log(`[Admin] Using validated API key for playlist import: ${validKeys[0].option}`);
+
+              setState((prev) => ({ ...prev, importProgress: 70 }));
               playlistItems = await youtubeAPIClient.getPlaylist(playlistId, apiKey);
+              setState((prev) => ({ ...prev, importProgress: 90 }));
               if (typeof window !== "undefined" && window.console) {
                 console.log(`[Admin] Fallback: Loaded ${playlistItems.length} videos from YouTube Data API for playlist ${playlistId}`);
               }
             } catch (apiError) {
-              if (typeof window !== "undefined" && window.console) {
-                console.error("[Admin] Fallback YouTube Data API failed:", apiError);
-              }
+              console.error("[Admin] Fallback YouTube Data API failed:", apiError);
+              setState((prev) => ({
+                ...prev,
+                importProgress: 0,
+                importError: apiError instanceof Error ? apiError.message : "Failed to import playlist. Please try again."
+              }));
+              return;
             }
           }
 
@@ -1189,14 +1176,28 @@ function Index() {
               defaultPlaylistVideos: playlistItems,
               inMemoryPlaylist: [...playlistItems],
               currentVideoIndex: 0,
+              importProgress: 100,
             }));
+
+            // Auto-hide popover after success
+            setTimeout(() => {
+              setState((prev) => ({
+                ...prev,
+                isImportingPlaylist: false,
+                importProgress: 0,
+                importError: null
+              }));
+            }, 1000);
+
             if (typeof window !== "undefined" && window.console) {
               console.log(`[Admin] Loaded ${playlistItems.length} videos from ${usedFallback ? "YouTube Data API" : "proxy"} for playlist ${playlistId}`);
             }
           } else {
-            if (typeof window !== "undefined" && window.console) {
-              console.error(`[Admin] Failed to load playlist from both proxy and YouTube Data API for playlist ${playlistId}`);
-            }
+            setState((prev) => ({
+              ...prev,
+              importProgress: 0,
+              importError: "No videos found in playlist. Please check the playlist ID and try again."
+            }));
           }
         }}
         currentPlaylistVideos={getCurrentPlaylistForDisplay()}
@@ -1204,10 +1205,28 @@ function Index() {
           setState((prev) => ({ ...prev, inMemoryPlaylist: newPlaylist }))
         }
         onPlaylistShuffle={() => {
-          const shuffled = [...state.inMemoryPlaylist].sort(
-            () => Math.random() - 0.5,
-          );
-          setState((prev) => ({ ...prev, inMemoryPlaylist: shuffled }));
+          // Don't shuffle if currently playing - only shuffle the remaining playlist
+          const currentSong = state.inMemoryPlaylist.find(song => song.title === state.currentlyPlaying);
+          const remainingPlaylist = state.inMemoryPlaylist.filter(song => song.title !== state.currentlyPlaying);
+          const shuffledRemaining = remainingPlaylist.sort(() => Math.random() - 0.5);
+          
+          // If there's a current song, keep it at the front
+          const shuffled = currentSong ? [currentSong, ...shuffledRemaining] : shuffledRemaining;
+          
+          // After shuffle, current song is at index 0, so next song is at index 1
+          const newCurrentVideoIndex = currentSong ? 1 : 0;
+          
+          setState((prev) => ({ 
+            ...prev, 
+            inMemoryPlaylist: shuffled,
+            currentVideoIndex: newCurrentVideoIndex
+          }));
+          
+          addLog('SONG_PLAYED', 'Playlist shuffled by admin (excluding current song)');
+          toast({
+            title: "Playlist Shuffled",
+            description: "The playlist order has been randomized (current song unchanged)",
+          });
         }}
         currentlyPlaying={state.currentlyPlaying}
         priorityQueue={state.priorityQueue}
@@ -1247,6 +1266,58 @@ function Index() {
         onAutoDetectDisplayChange={(autoDetect) =>
           setState((prev) => ({ ...prev, autoDetectDisplay: autoDetect }))
         }
+        adaptiveQualityEnabled={state.adaptiveQualityEnabled}
+        onAdaptiveQualityEnabledChange={(enabled) =>
+          setState((prev) => ({ ...prev, adaptiveQualityEnabled: enabled }))
+        }
+        showDisplaySelectionDialogOnStartup={state.showDisplaySelectionDialogOnStartup}
+        onShowDisplaySelectionDialogOnStartupChange={(show) =>
+          setState((prev) => ({ ...prev, showDisplaySelectionDialogOnStartup: show }))
+        }
+        bgVisualMode={state.bgVisualMode}
+        onBgVisualModeChange={(mode) =>
+          setState((prev) => ({ ...prev, bgVisualMode: mode }))
+        }
+      />
+
+      {/* Display Selection Dialog */}
+      <DisplaySelectionDialog
+        isOpen={state.showDisplaySelectionDialog}
+        onClose={() => setState(prev => ({ ...prev, showDisplaySelectionDialog: false }))}
+        onSelectDisplay={(displayId) => {
+          // Set both selectedDisplay and userDefaultPlayerDisplay for persistence
+          setState(prev => ({
+            ...prev,
+            selectedDisplay: displayId,
+            userDefaultPlayerDisplay: {
+              displayId,
+              fullscreen: prev.useFullscreen,
+              position: prev.playerWindowPosition
+            },
+            showDisplaySelectionDialog: false,
+            showDisplaySelectionDialogOnStartup: false
+          }));
+          // Initialize player with selected display
+          initializePlayer();
+        }}
+        onAutoOpenPlayer={() => {
+          // Set default display based on current selection or primary display
+          const defaultDisplayId = state.selectedDisplay || 'primary';
+          setState(prev => ({
+            ...prev,
+            userDefaultPlayerDisplay: {
+              displayId: defaultDisplayId,
+              fullscreen: prev.useFullscreen,
+              position: prev.playerWindowPosition
+            },
+            showDisplaySelectionDialog: false,
+            showDisplaySelectionDialogOnStartup: false
+          }));
+          initializePlayer();
+        }}
+        currentDefaultDisplay={state.selectedDisplay}
+        useFullscreen={state.useFullscreen}
+        isPlayerRunning={state.isPlayerRunning}
       />
 
       {/* Display Confirmation Dialog */}
@@ -1269,6 +1340,19 @@ function Index() {
         onOkClick={handleQuotaExhaustedOk}
       />
 
+      {/* Playlist Import Popover */}
+      <PlaylistImportPopover
+        isOpen={state.isImportingPlaylist}
+        progress={state.importProgress}
+        error={state.importError}
+        onClose={() => setState(prev => ({
+          ...prev,
+          isImportingPlaylist: false,
+          importProgress: 0,
+          importError: null
+        }))}
+      />
+
       {/* App Pause Overlay */}
       {state.isAppPaused && (
         <div className="fixed inset-0 bg-black bg-opacity-90 z-50 flex items-center justify-center">
@@ -1280,6 +1364,15 @@ function Index() {
           </div>
         </div>
       )}
+
+      {/* Permission Dialog */}
+      <PermissionDialog
+        isOpen={permissionDialogState.isOpen}
+        onClose={() => setPermissionDialogState({ isOpen: false, permissionType: null })}
+        permissionType={permissionDialogState.permissionType || 'autoplay'}
+        onPermissionGranted={handlePermissionGranted}
+        onPermissionDenied={handlePermissionDenied}
+      />
 
     </BackgroundDisplay>
   );

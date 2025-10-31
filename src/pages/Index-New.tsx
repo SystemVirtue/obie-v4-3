@@ -28,8 +28,11 @@ const JukeboxInterface = () => {
     cycleBackgrounds: state.cycleBackgrounds,
     backgroundCycleIndex: state.backgroundCycleIndex,
     bounceVideos: state.bounceVideos,
+    backgroundSettings: state.backgroundSettings,
     onBackgroundCycleIndexChange: (index) =>
       setState((prev) => ({ ...prev, backgroundCycleIndex: index })),
+    onSelectedBackgroundChange: (id) =>
+      setState((prev) => ({ ...prev, selectedBackground: id })),
   });
 
   const currentBackground = getCurrentBackground();

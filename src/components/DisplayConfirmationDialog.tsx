@@ -20,8 +20,9 @@ interface DisplayConfirmationDialogProps {
 }
 
 export const DisplayConfirmationDialog: React.FC<DisplayConfirmationDialogProps> = ({ isOpen, displayInfo, onConfirm, onCancel }) => {
-  if (!displayInfo) return null;
   const [rememberChoice, setRememberChoice] = React.useState(false);
+
+  if (!displayInfo) return null;
 
   const handleFullscreenConfirm = () => {
     onConfirm(true, rememberChoice);

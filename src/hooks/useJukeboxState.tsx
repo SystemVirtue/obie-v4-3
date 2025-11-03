@@ -135,6 +135,7 @@ const saveUserPreferences = (state: JukeboxFullState) => {
       backgroundQueueIndex: state.backgroundQueueIndex,
       backgroundSettings: state.backgroundSettings,
       bgVisualMode: state.bgVisualMode,
+      playerIdentifier: state.playerIdentifier,
     };
     localStorage.setItem("USER_PREFERENCES", JSON.stringify(preferencesToSave));
     console.log("[UserPreferences] Settings saved to localStorage");
@@ -244,6 +245,9 @@ export const useJukeboxState = () => {
     playerWindowPosition: userPreferences.playerWindowPosition || null,
     userDefaultPlayerDisplay: userPreferences.userDefaultPlayerDisplay || null,
     
+    // Kiosk integration
+    playerIdentifier: userPreferences.playerIdentifier || "default",
+    
     // History state
     logs: [],
     userRequests: [],
@@ -289,6 +293,7 @@ export const useJukeboxState = () => {
     state.playerWindowPosition,
     state.userDefaultPlayerDisplay,
     state.bgVisualMode,
+    state.playerIdentifier,
   ]);
 
   // Save current video index whenever it changes

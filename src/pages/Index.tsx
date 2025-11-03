@@ -28,6 +28,8 @@ import { usePlayerManager } from "@/hooks/usePlayerManager";
 import { usePlaylistManager } from "@/hooks/usePlaylistManager";
 import { useVideoSearch } from "@/hooks/useVideoSearch";
 import { useApiKeyRotation } from "@/hooks/useApiKeyRotation";
+import { useKioskRequests } from "@/hooks/useKioskRequests";
+import { useKioskCredits } from "@/hooks/useKioskCredits";
 import { LoadingIndicator } from "@/components/LoadingIndicator";
 import { CreditsDisplay } from "@/components/CreditsDisplay";
 import { DisplayConfirmationDialog } from "@/components/DisplayConfirmationDialog";
@@ -47,7 +49,7 @@ import { PermissionDialog } from "@/components/PermissionDialog";
 import { useDisplayConfirmation } from "@/hooks/useDisplayConfirmation";
 import { useStorageSync } from "@/hooks/useStorageSync";
 import { usePlayerInitialization } from "@/hooks/usePlayerInitialization";
-import type { DisplayInfo } from "@/types/jukebox";
+import type { DisplayInfo, QueuedRequest } from "@/types/jukebox";
 import { youtubeQuotaService } from "@/services/youtube/api";
 import { shouldTestApiKeys } from "@/utils/apiKeyValidator";
 import { useAppInitialization } from "@/hooks/useAppInitialization";
@@ -406,6 +408,46 @@ function Index() {
     checkAndRotateIfNeeded,
   );
 
+  // Kiosk integration - register player and listen for song requests
+  useKioskRequests({
+    playerId: state.playerIdentifier,
+    onSongRequest: (videoId, title, artist) => {
+      console.log(`[Kiosk] Received song request: ${title} (${videoId})`);
+      
+      // Auto-approve kiosk requests - add directly to priority queue without confirmation dialog
+      const newRequest: QueuedRequest = {
+        id: videoId,
+        title: title || "Unknown Title",
+        channelTitle: artist || "Unknown Artist",
+        videoId: videoId,
+        timestamp: new Date().toISOString(),
+      };
+
+      setState((prev) => ({
+        ...prev,
+        priorityQueue: [...prev.priorityQueue, newRequest],
+      }));
+
+      addLog(
+        "USER_SELECTION",
+        `Kiosk request: ${title}`,
+        videoId,
+      );
+      addUserRequest(
+        title || "Unknown Title",
+        videoId,
+        artist || "Unknown Artist",
+      );
+
+      // Show toast notification
+      toast({
+        title: "Kiosk Request Added",
+        description: `"${title}" by ${artist} added to priority queue`,
+      });
+    },
+    enabled: true,
+  });
+
   // Periodic check for rotation (every 5 minutes)
   useEffect(() => {
     if (!state.autoRotateApiKeys) return;
@@ -464,14 +506,57 @@ function Index() {
   useSerialCommunication({
     mode: state.mode,
     selectedCoinAcceptor: state.selectedCoinAcceptor,
-    onCreditsChange: (delta) =>
-      setState((prev) => ({ ...prev, credits: prev.credits + delta })),
+    onCreditsChange: (delta) => {
+      setState((prev) => ({ ...prev, credits: prev.credits + delta }));
+      // Sync credits to Supabase when coin is inserted
+      addKioskCredits(delta).catch(err => console.error("Failed to sync coin credits:", err));
+    },
 
     credits: state.credits,
     onAddLog: addLog,
     coinValueA: state.coinValueA,
     coinValueB: state.coinValueB,
   });
+
+  // Kiosk credit synchronization - syncs mode and credits to Supabase
+  const {
+    setMode: setKioskMode,
+    setCredits: setKioskCredits,
+    addCredits: addKioskCredits,
+  } = useKioskCredits({
+    playerId: state.playerIdentifier,
+    enabled: true,
+    onCreditsChange: (newCredits) => {
+      // Update local state when Supabase credits change (e.g., from kiosk)
+      setState((prev) => ({ ...prev, credits: newCredits }));
+    },
+    onModeChange: (newMode) => {
+      // Update local state when Supabase mode changes
+      setState((prev) => ({ ...prev, mode: newMode }));
+    },
+  });
+
+  // Sync credit changes to Supabase (e.g., when song is added via confirmAddToPlaylist)
+  const prevCreditsRef = useRef(state.credits);
+  useEffect(() => {
+    // Skip initial render and skip if credits haven't changed
+    if (prevCreditsRef.current === state.credits) {
+      prevCreditsRef.current = state.credits;
+      return;
+    }
+
+    // Only sync if credits decreased (song added) or increased (manual adjustment)
+    const creditDelta = state.credits - prevCreditsRef.current;
+    
+    if (creditDelta !== 0) {
+      console.log(`[Index] Credits changed by ${creditDelta}, syncing to Supabase...`);
+      setKioskCredits(state.credits).catch(err => {
+        console.error("[Index] Failed to sync credits to Supabase:", err);
+      });
+    }
+
+    prevCreditsRef.current = state.credits;
+  }, [state.credits, setKioskCredits]);
 
   // Initialize playlist ONLY when API key is properly selected AND playlist changes
   const [hasInitialized, setHasInitialized] = useState(false);
@@ -1032,9 +1117,17 @@ function Index() {
         isOpen={state.isAdminOpen}
         onClose={() => setState((prev) => ({ ...prev, isAdminOpen: false }))}
         mode={state.mode}
-        onModeChange={(mode) => setState((prev) => ({ ...prev, mode }))}
+        onModeChange={(mode) => {
+          setState((prev) => ({ ...prev, mode }));
+          // Sync mode to Supabase for kiosk
+          setKioskMode(mode).catch(err => console.error("Failed to sync mode:", err));
+        }}
         credits={state.credits}
-        onCreditsChange={(credits) => setState((prev) => ({ ...prev, credits }))}
+        onCreditsChange={(credits) => {
+          setState((prev) => ({ ...prev, credits }));
+          // Sync credits to Supabase for kiosk
+          setKioskCredits(credits).catch(err => console.error("Failed to sync credits:", err));
+        }}
         apiKey={state.apiKey}
         onApiKeyChange={(key) => setState((prev) => ({ ...prev, apiKey: key }))}
         selectedApiKeyOption={state.selectedApiKeyOption}
@@ -1277,6 +1370,10 @@ function Index() {
         bgVisualMode={state.bgVisualMode}
         onBgVisualModeChange={(mode) =>
           setState((prev) => ({ ...prev, bgVisualMode: mode }))
+        }
+        playerIdentifier={state.playerIdentifier}
+        onPlayerIdentifierChange={(identifier) =>
+          setState((prev) => ({ ...prev, playerIdentifier: identifier }))
         }
       />
 

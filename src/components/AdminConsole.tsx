@@ -17,6 +17,7 @@ import { DisplayButtonGrid } from "@/components/DisplayButtonGrid";
 import { BackgroundAssetsPanel } from "@/components/BackgroundAssetsPanel";
 import { BackgroundSettingsPanel } from "@/components/BackgroundSettingsPanel";
 import { BackgroundAssetsErrorBoundary } from "@/components/BackgroundAssetsErrorBoundary";
+import { PlayerIdentifierPanel } from "@/components/PlayerIdentifierPanel";
 import {
   Dialog,
   DialogContent,
@@ -222,6 +223,8 @@ interface AdminConsoleProps {
   bgVisualMode: "random" | "images-only" | "videos-only" | "custom-queue";
   onBgVisualModeChange: (mode: "random" | "images-only" | "videos-only" | "custom-queue") => void;
   isImportingPlaylist?: boolean;
+  playerIdentifier: string;
+  onPlayerIdentifierChange: (identifier: string) => void;
 }
 
 const AVAILABLE_PLAYLISTS: PlaylistInfo[] = [
@@ -319,6 +322,8 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
   showDisplaySelectionDialogOnStartup,
   onShowDisplaySelectionDialogOnStartupChange,
   isImportingPlaylist,
+  playerIdentifier,
+  onPlayerIdentifierChange,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showPlaylistDialog, setShowPlaylistDialog] = useState(false);
@@ -746,6 +751,11 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
               onHideEndCardsChange={onHideEndCardsChange}
               adaptiveQualityEnabled={adaptiveQualityEnabled}
               onAdaptiveQualityEnabledChange={onAdaptiveQualityEnabledChange}
+            />
+
+            <PlayerIdentifierPanel
+              playerIdentifier={playerIdentifier}
+              onPlayerIdentifierChange={onPlayerIdentifierChange}
             />
 
             <ApiManagementPanel

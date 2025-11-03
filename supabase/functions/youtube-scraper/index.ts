@@ -1,8 +1,11 @@
 // Type definitions loaded automatically by Deno runtime
+// CORS fix applied: 2025-11-03
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+  'Access-Control-Max-Age': '86400',
 };
 
 interface ScraperRequest {
@@ -20,11 +23,17 @@ interface VideoResult {
   videoUrl: string;
   duration?: string;
   durationMinutes?: number;
+  categoryId?: string;
+  isEmbeddable?: boolean;
 }
 
 Deno.serve(async (req) => {
+  // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
+    return new Response(null, { 
+      status: 204,
+      headers: corsHeaders 
+    });
   }
 
   try {
@@ -91,6 +100,7 @@ Deno.serve(async (req) => {
 });
 
 async function scrapeYouTubeSearch(query: string, limit: number): Promise<VideoResult[]> {
+  // Use music filter in search URL to get music videos only
   const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}&sp=EgIQAQ%253D%253D`;
   
   console.log(`[Scraper] Fetching search results from: ${searchUrl}`);
@@ -168,6 +178,12 @@ function parseSearchResults(html: string, limit: number): VideoResult[] {
         const thumbnail = videoRenderer.thumbnail?.thumbnails?.[0]?.url || '';
         const lengthText = videoRenderer.lengthText?.simpleText || '0:00';
         
+        // Extract badges to check for music category
+        const badges = videoRenderer.badges || [];
+        const isMusicVideo = badges.some((badge: any) => 
+          badge?.metadataBadgeRenderer?.label?.toLowerCase().includes('music')
+        );
+        
         videos.push({
           id: videoId,
           title: cleanTitle(title),
@@ -176,6 +192,8 @@ function parseSearchResults(html: string, limit: number): VideoResult[] {
           videoUrl: `https://www.youtube.com/watch?v=${videoId}`,
           duration: lengthText,
           durationMinutes: parseDurationToMinutes(lengthText),
+          categoryId: isMusicVideo ? '10' : undefined, // YouTube Music category ID
+          isEmbeddable: true, // Assume embeddable unless proven otherwise
         });
       }
       
@@ -227,6 +245,8 @@ function parsePlaylistResults(html: string, limit: number): VideoResult[] {
         videoUrl: `https://www.youtube.com/watch?v=${videoId}`,
         duration: lengthText,
         durationMinutes: parseDurationToMinutes(lengthText),
+        categoryId: '10', // Playlists are typically music
+        isEmbeddable: true, // Assume embeddable unless proven otherwise
       });
     }
   } catch (error) {

@@ -18,6 +18,8 @@ export interface Video {
   duration?: string;
   durationMinutes?: number;
   officialScore?: number;
+  categoryId?: string;
+  isEmbeddable?: boolean;
 }
 
 /**
@@ -243,6 +245,9 @@ export interface JukeboxConfigState {
   showDisplaySelectionDialogOnStartup: boolean;
   playerWindowPosition: { x: number; y: number; width: number; height: number } | null;
   userDefaultPlayerDisplay: { displayId: string; fullscreen: boolean; position?: { x: number; y: number; width: number; height: number } } | null;
+  
+  // Kiosk integration
+  playerIdentifier: string;
 }
 
 /**
@@ -405,6 +410,7 @@ export interface UserPreferences {
   backgroundQueueIndex: number;
   backgroundSettings: BackgroundSettings;
   bgVisualMode: 'random' | 'images-only' | 'videos-only' | 'custom-queue';
+  playerIdentifier: string;  // Player ID for kiosk-player communication
 }
 
 

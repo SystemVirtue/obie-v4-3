@@ -1,0 +1,109 @@
+-- Create players table for tracking active player instances
+CREATE TABLE IF NOT EXISTS public.players (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  player_id TEXT UNIQUE NOT NULL,
+  is_active BOOLEAN DEFAULT true,
+  last_seen TIMESTAMPTZ DEFAULT now(),
+  device_name TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Create song_requests table for kiosk requests
+CREATE TABLE IF NOT EXISTS public.song_requests (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  player_id TEXT NOT NULL,
+  video_id TEXT NOT NULL,
+  title TEXT,
+  artist TEXT,
+  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'processed', 'rejected')),
+  created_at TIMESTAMPTZ DEFAULT now(),
+  processed_at TIMESTAMPTZ,
+  CONSTRAINT fk_player FOREIGN KEY (player_id) REFERENCES public.players(player_id) ON DELETE CASCADE
+);
+
+-- Enable Row Level Security
+ALTER TABLE public.players ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.song_requests ENABLE ROW LEVEL SECURITY;
+
+-- RLS Policies for players table
+-- Anyone can view active players (for kiosk to discover)
+CREATE POLICY "Anyone can view active players"
+  ON public.players
+  FOR SELECT
+  USING (is_active = true);
+
+-- Players can register/update themselves
+CREATE POLICY "Players can register themselves"
+  ON public.players
+  FOR INSERT
+  WITH CHECK (true);
+
+CREATE POLICY "Players can update themselves"
+  ON public.players
+  FOR UPDATE
+  USING (true);
+
+-- RLS Policies for song_requests table
+-- Kiosks can insert requests to active players
+CREATE POLICY "Kiosks can submit requests"
+  ON public.song_requests
+  FOR INSERT
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM public.players 
+      WHERE players.player_id = song_requests.player_id 
+      AND players.is_active = true
+    )
+  );
+
+-- Anyone can view requests (for debugging/monitoring)
+CREATE POLICY "Anyone can view requests"
+  ON public.song_requests
+  FOR SELECT
+  USING (true);
+
+-- Players can update their own requests (mark as processed)
+CREATE POLICY "Players can update their requests"
+  ON public.song_requests
+  FOR UPDATE
+  USING (true);
+
+-- Create indexes for performance
+CREATE INDEX idx_players_player_id ON public.players(player_id);
+CREATE INDEX idx_players_is_active ON public.players(is_active);
+CREATE INDEX idx_players_last_seen ON public.players(last_seen);
+CREATE INDEX idx_song_requests_player_id ON public.song_requests(player_id);
+CREATE INDEX idx_song_requests_status ON public.song_requests(status);
+CREATE INDEX idx_song_requests_created_at ON public.song_requests(created_at);
+
+-- Trigger to update updated_at timestamp
+CREATE OR REPLACE FUNCTION update_players_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER update_players_updated_at_trigger
+  BEFORE UPDATE ON public.players
+  FOR EACH ROW
+  EXECUTE FUNCTION update_players_updated_at();
+
+-- Enable realtime for song_requests (so players get notified)
+ALTER PUBLICATION supabase_realtime ADD TABLE public.song_requests;
+
+-- Function to auto-deactivate stale players (not seen in 60 seconds)
+CREATE OR REPLACE FUNCTION deactivate_stale_players()
+RETURNS void AS $$
+BEGIN
+  UPDATE public.players
+  SET is_active = false
+  WHERE is_active = true
+  AND last_seen < now() - interval '60 seconds';
+END;
+$$ LANGUAGE plpgsql;
+
+-- Comment: You can call this function periodically or use pg_cron extension
+-- For now, it's manual: SELECT deactivate_stale_players();

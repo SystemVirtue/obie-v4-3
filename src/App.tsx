@@ -7,6 +7,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import Index from "./pages/Index";
 import Admin from "./pages/Admin";
 import Remote from "./pages/Remote";
+import SearchKiosk from "./pages/SearchKiosk";
 import NotFound from "./pages/NotFound";
 
 /**
@@ -27,6 +28,7 @@ const App = () => (
             <Route path="/" element={<Index />} />
             <Route path="/admin" element={<Admin />} />
             <Route path="/remote" element={<Remote />} />
+            <Route path="/kiosk" element={<SearchKiosk />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>

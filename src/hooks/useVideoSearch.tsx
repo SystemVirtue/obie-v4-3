@@ -7,6 +7,32 @@ import {
 } from "./useJukeboxState";
 import { musicSearchService } from "@/services/youtube/search/searchService";
 
+/**
+ * Validate search result for music video and embeddability requirements
+ */
+const validateSearchResult = (video: SearchResult, maxSongLength: number): boolean => {
+  // Check duration
+  if (video.durationMinutes && video.durationMinutes > maxSongLength) {
+    return false;
+  }
+  
+  // Check if it's a music video (category ID 10)
+  // If categoryId is not provided, allow it (backward compatibility)
+  if (video.categoryId && video.categoryId !== '10') {
+    console.log(`[Validation] Filtered non-music video: ${video.title} (category: ${video.categoryId})`);
+    return false;
+  }
+  
+  // Check if embeddable in iframe
+  // If isEmbeddable is not provided, allow it (backward compatibility)
+  if (video.isEmbeddable === false) {
+    console.log(`[Validation] Filtered non-embeddable video: ${video.title}`);
+    return false;
+  }
+  
+  return true;
+};
+
 export const useVideoSearch = (
   state: JukeboxState,
   setState: React.Dispatch<React.SetStateAction<JukeboxState>>,
@@ -73,8 +99,8 @@ export const useVideoSearch = (
           48,
         );
 
-        const filteredResults = searchResults.filter(
-          (video) => video.durationMinutes! <= state.maxSongLength,
+        const filteredResults = searchResults.filter((video) =>
+          validateSearchResult(video, state.maxSongLength)
         );
 
         console.log(`HTML parser search completed:`, filteredResults);
@@ -126,12 +152,18 @@ export const useVideoSearch = (
         48,
       );
 
-      const filteredResults = searchResults.filter(
-        (video) => video.durationMinutes! <= state.maxSongLength,
+      const filteredResults = searchResults.filter((video) =>
+        validateSearchResult(video, state.maxSongLength)
       );
 
       console.log(`Search completed:`, filteredResults);
-      setState((prev) => ({ ...prev, searchResults: filteredResults }));
+      
+      // Set both searchResults AND isSearching in the same call to avoid race conditions
+      setState((prev) => ({ 
+        ...prev, 
+        searchResults: filteredResults,
+        isSearching: false, // ← Add this here instead of in finally block
+      }));
 
       if (filteredResults.length === 0) {
         toast({
@@ -154,13 +186,14 @@ export const useVideoSearch = (
             48,
           );
 
-          const filteredFallbackResults = fallbackResults.filter(
-            (video) => video.durationMinutes! <= state.maxSongLength,
+          const filteredFallbackResults = fallbackResults.filter((video) =>
+            validateSearchResult(video, state.maxSongLength)
           );
 
           setState((prev) => ({
             ...prev,
             searchResults: filteredFallbackResults,
+            isSearching: false, // ← Set here too for fallback case
           }));
 
           toast({
@@ -174,13 +207,14 @@ export const useVideoSearch = (
         }
       }
 
+      // If we get here, search failed completely
+      setState((prev) => ({ ...prev, isSearching: false }));
+      
       toast({
         title: "Search Error",
         description: "Failed to search for music videos. Please try again.",
         variant: "destructive",
       });
-    } finally {
-      setState((prev) => ({ ...prev, isSearching: false }));
     }
   };
 
@@ -280,10 +314,12 @@ export const useVideoSearch = (
         case "SEARCH":
           console.log("Search button pressed, query:", newQuery);
           if (newQuery.trim()) {
-            // Perform search asynchronously
+            // Perform search asynchronously - performSearch will handle ALL state updates
             setTimeout(() => performSearch(newQuery), 0);
           }
-          return prev; // Don't update query here, let performSearch handle state
+          // Return prev WITHOUT spreading - this tells React there's no change
+          // and prevents triggering the setState adapter
+          return prev;
         default:
           newQuery += key;
           console.log("New query after key press:", newQuery);

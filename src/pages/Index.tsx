@@ -1364,12 +1364,21 @@ function Index() {
           if (show) {
             closePlayerWindow();
             console.log("[Index] Mini player enabled - closed separate window");
+            
+            // Find the currently playing song to get its video ID
+            const currentSong = state.inMemoryPlaylist.find(song => song.title === state.currentlyPlaying);
+            const currentVideoId = currentSong?.videoId || state.currentVideoId || "";
+            
+            console.log("[Index] Setting currentVideoId for mini player:", currentVideoId);
+            
             // IMPORTANT: Set isPlayerRunning to true to prevent loading indicator
+            // ALSO: Set currentVideoId so ended events are properly detected
             // ALSO: Close display selection dialog if it's open
             setState((prev) => ({ 
               ...prev, 
               showMiniPlayer: true,
               isPlayerRunning: true,
+              currentVideoId: currentVideoId,
               showDisplaySelectionDialog: false // Close dialog when enabling mini player
             }));
           } else {

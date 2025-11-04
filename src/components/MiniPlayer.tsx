@@ -133,18 +133,29 @@ export const MiniPlayer = ({ videoId, showMiniPlayer, isMainPlayer = false }: Mi
             }
           },
           onError: (event: any) => {
-            console.error('[MiniPlayer] Error:', event.data);
+            const errorCode = event.data;
+            const errorMessages: { [key: number]: string } = {
+              2: 'Invalid video ID',
+              5: 'HTML5 player error',
+              100: 'Video not found',
+              101: 'Video not allowed',
+              150: 'Video not allowed'
+            };
             
-            // Send error status
+            const errorMessage = errorMessages[errorCode] || `Unknown error (${errorCode})`;
+            console.error('[MiniPlayer] Error:', errorCode, '-', errorMessage, 'Video ID:', currentVideoIdRef.current);
+            
+            // Send error status to trigger skip
             const statusData = {
               status: 'error',
-              title: 'Video error',
+              title: errorMessage,
               videoId: currentVideoIdRef.current,
               id: currentVideoIdRef.current,
               timestamp: Date.now()
             };
             
             localStorage.setItem('jukeboxStatus', JSON.stringify(statusData));
+            console.log('[MiniPlayer] Sent error status to trigger auto-skip');
           }
         }
       });
@@ -163,6 +174,12 @@ export const MiniPlayer = ({ videoId, showMiniPlayer, isMainPlayer = false }: Mi
   // Load new video when videoId changes
   useEffect(() => {
     if (!showMiniPlayer || !videoId || !playerRef.current) {
+      return;
+    }
+
+    // Validate video ID format (YouTube IDs are typically 11 characters)
+    if (!videoId || videoId.length < 5) {
+      console.error('[MiniPlayer] Invalid video ID format:', videoId);
       return;
     }
 

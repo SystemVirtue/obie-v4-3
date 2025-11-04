@@ -410,8 +410,9 @@ export const MiniPlayer = ({ videoId, showMiniPlayer, isMainPlayer = false }: Mi
     };
   }, [showMiniPlayer, isMainPlayer]);
 
-  // Don't render if showMiniPlayer is false or no video ID
-  if (!showMiniPlayer || !videoId) {
+  // Don't render if showMiniPlayer is false
+  // Allow rendering even without videoId - player will load video when ID is available
+  if (!showMiniPlayer) {
     return null;
   }
 

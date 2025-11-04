@@ -56,6 +56,7 @@ export const useStorageSync = ({
   const handleVideoEndedRef = useRef(handleVideoEnded);
   const lastHeartbeatRef = useRef<number>(Date.now());
   const heartbeatTimeoutRef = useRef<NodeJS.Timeout>();
+  const handleStorageChangeRef = useRef<(event: StorageEvent) => void>();
 
   // Keep refs updated
   useEffect(() => {
@@ -346,6 +347,11 @@ export const useStorageSync = ({
     [setState, addLog],
   );
 
+  // Store the latest handleStorageChange in ref
+  useEffect(() => {
+    handleStorageChangeRef.current = handleStorageChange;
+  }, [handleStorageChange]);
+
   /**
    * Set up storage event listener and polling
    * 
@@ -353,7 +359,11 @@ export const useStorageSync = ({
    * so we use polling to detect changes made by the player window
    */
   useEffect(() => {
-    window.addEventListener("storage", handleStorageChange);
+    const listener = (event: StorageEvent) => {
+      handleStorageChangeRef.current?.(event);
+    };
+    
+    window.addEventListener("storage", listener);
     
     // Poll for localStorage changes (storage events don't fire in same window)
     let lastStatus = localStorage.getItem('jukeboxStatus');
@@ -368,8 +378,8 @@ export const useStorageSync = ({
         });
         lastStatus = currentStatus;
         if (currentStatus) {
-          // Simulate storage event for polling-detected changes
-          handleStorageChange({
+          // Simulate storage event for polling-detected changes using the latest handler
+          handleStorageChangeRef.current?.({
             key: 'jukeboxStatus',
             newValue: currentStatus,
             oldValue: null,
@@ -381,13 +391,13 @@ export const useStorageSync = ({
     }, 250); // Check every 250ms for responsiveness
     
     return () => {
-      window.removeEventListener("storage", handleStorageChange);
+      window.removeEventListener("storage", listener);
       clearInterval(pollInterval);
       if (heartbeatTimeoutRef.current) {
         clearTimeout(heartbeatTimeoutRef.current);
       }
     };
-  }, [handleStorageChange]);
+  }, []); // No dependencies - runs once and uses refs for latest values
 
   /**
    * Emergency recovery event listener

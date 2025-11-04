@@ -46,6 +46,16 @@ export default function SearchKiosk() {
   const [showPlayerIdDialog, setShowPlayerIdDialog] = useState(false);
   const [newPlayerId, setNewPlayerId] = useState("");
   
+  // Auto-connect countdown states
+  const [showAutoConnectCountdown, setShowAutoConnectCountdown] = useState(false);
+  const [autoConnectCountdown, setAutoConnectCountdown] = useState(5);
+  const [storedPlayerIdForCountdown, setStoredPlayerIdForCountdown] = useState<string | null>(null);
+  
+  // Coin acceptor auto-connection states
+  const [showCoinAcceptorDialog, setShowCoinAcceptorDialog] = useState(false);
+  const [detectedCoinAcceptorId, setDetectedCoinAcceptorId] = useState<string | null>(null);
+  const [hasPromptedForCoinAcceptor, setHasPromptedForCoinAcceptor] = useState(false);
+  
   // Search state
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [showKeyboard, setShowKeyboard] = useState(false);
@@ -168,15 +178,59 @@ export default function SearchKiosk() {
     const storedPlayerId = localStorage.getItem('kiosk_player_id');
     
     if (!storedPlayerId || storedPlayerId.trim() === "") {
-      // No player ID stored - prompt user
+      // No player ID stored - prompt user immediately
       setIsValidatingPlayer(false);
       setShowPlayerIdDialog(true);
     } else {
-      // Player ID exists - validate it
-      setKioskPlayerId(storedPlayerId);
-      validatePlayer(storedPlayerId);
+      // Player ID exists - show countdown dialog
+      setStoredPlayerIdForCountdown(storedPlayerId);
+      setShowAutoConnectCountdown(true);
+      setIsValidatingPlayer(false);
     }
   }, []);
+
+  /**
+   * Countdown timer for auto-connect
+   */
+  useEffect(() => {
+    if (!showAutoConnectCountdown || autoConnectCountdown <= 0) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      const newCount = autoConnectCountdown - 1;
+      setAutoConnectCountdown(newCount);
+      
+      if (newCount === 0) {
+        // Auto-connect after countdown
+        handleAutoConnect();
+      }
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }, [showAutoConnectCountdown, autoConnectCountdown]);
+
+  /**
+   * Handle auto-connect after countdown
+   */
+  const handleAutoConnect = useCallback(() => {
+    if (storedPlayerIdForCountdown) {
+      setShowAutoConnectCountdown(false);
+      setKioskPlayerId(storedPlayerIdForCountdown);
+      setIsValidatingPlayer(true);
+      validatePlayer(storedPlayerIdForCountdown);
+    }
+  }, [storedPlayerIdForCountdown]);
+
+  /**
+   * Handle cancelling auto-connect (show edit dialog)
+   */
+  const handleCancelAutoConnect = useCallback(() => {
+    setShowAutoConnectCountdown(false);
+    setAutoConnectCountdown(5); // Reset for next time
+    setNewPlayerId(storedPlayerIdForCountdown || "");
+    setShowPlayerIdDialog(true);
+  }, [storedPlayerIdForCountdown]);
 
   /**
    * Validate that the player is active in Supabase
@@ -227,6 +281,9 @@ export default function SearchKiosk() {
         title: "Player Connected",
         description: `Connected to ${player.device_name || playerId}`,
       });
+      
+      // After successful player validation, check for coin acceptor
+      checkForCoinAcceptor();
     } catch (err) {
       console.error("[Kiosk] Validation error:", err);
       setPlayerValidationError(
@@ -235,6 +292,76 @@ export default function SearchKiosk() {
       setIsValidatingPlayer(false);
     }
   }, [toast]);
+
+  /**
+   * Check for coin acceptor device after player validation
+   */
+  const checkForCoinAcceptor = useCallback(async () => {
+    // Only check once per session
+    if (hasPromptedForCoinAcceptor) {
+      return;
+    }
+
+    // Check if Web Serial API is supported
+    if (!('serial' in navigator)) {
+      console.log('[Kiosk] Web Serial API not supported');
+      return;
+    }
+
+    try {
+      console.log('[Kiosk] Checking for coin acceptor devices...');
+      
+      const ports = await (navigator as any).serial.getPorts();
+      let targetPort = null;
+      let deviceId = null;
+
+      // Look for usbserial-1420 device
+      for (const port of ports) {
+        const info = port.getInfo();
+        console.log('[Kiosk] Found serial device:', info);
+        
+        if (info.usbProductId === 1420 || 
+            info.serialNumber?.includes('usbserial-1420') ||
+            info.usbVendorId === 1420) {
+          targetPort = port;
+          deviceId = info.serialNumber || `USB-${info.usbVendorId}-${info.usbProductId}`;
+          break;
+        }
+      }
+
+      if (targetPort && deviceId) {
+        console.log('[Kiosk] Coin acceptor device detected:', deviceId);
+        setDetectedCoinAcceptorId(deviceId);
+        setShowCoinAcceptorDialog(true);
+        setHasPromptedForCoinAcceptor(true);
+      } else {
+        console.log('[Kiosk] No coin acceptor device found');
+        setHasPromptedForCoinAcceptor(true); // Don't check again this session
+      }
+    } catch (err) {
+      console.error('[Kiosk] Error checking for coin acceptor:', err);
+      setHasPromptedForCoinAcceptor(true); // Don't check again this session
+    }
+  }, [hasPromptedForCoinAcceptor]);
+
+  /**
+   * Handle connecting to coin acceptor
+   */
+  const handleConnectCoinAcceptor = useCallback(() => {
+    setShowCoinAcceptorDialog(false);
+    toast({
+      title: "Coin Acceptor",
+      description: "Coin acceptor connection will be handled by the serial communication hook",
+    });
+  }, [toast]);
+
+  /**
+   * Handle declining coin acceptor connection
+   */
+  const handleDeclineCoinAcceptor = useCallback(() => {
+    setShowCoinAcceptorDialog(false);
+    console.log('[Kiosk] User declined coin acceptor connection');
+  }, []);
 
   /**
    * Handle saving a new player ID
@@ -411,6 +538,50 @@ export default function SearchKiosk() {
     handleSongSelect(videoId, video.title, video.channelTitle);
   }, [confirmDialog, setConfirmDialog, handleSongSelect]);
 
+  // Show auto-connect countdown dialog
+  if (showAutoConnectCountdown) {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-slate-900 to-slate-800 flex items-center justify-center p-4">
+        <Card className="w-full max-w-md border-amber-500 border-2">
+          <CardContent className="pt-6">
+            <div className="text-center space-y-4">
+              <Monitor className="w-16 h-16 mx-auto text-amber-500" />
+              <h1 className="text-2xl font-bold text-slate-900">
+                Kiosk Auto-Connect
+              </h1>
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                <p className="text-slate-700 mb-2">
+                  Kiosk connecting to Player ID:
+                </p>
+                <p className="text-2xl font-mono font-bold text-amber-600">
+                  {storedPlayerIdForCountdown}
+                </p>
+              </div>
+              
+              <div className="text-6xl font-bold text-amber-600">
+                {autoConnectCountdown}
+              </div>
+              
+              <p className="text-slate-600">
+                Auto-connecting in {autoConnectCountdown} second{autoConnectCountdown !== 1 ? 's' : ''}...
+              </p>
+              
+              <Button
+                onClick={handleCancelAutoConnect}
+                variant="outline"
+                size="lg"
+                className="w-full"
+              >
+                <Edit className="w-4 h-4 mr-2" />
+                Edit Player ID
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   // Show player ID input dialog if no player ID
   if (showPlayerIdDialog) {
     return (
@@ -535,24 +706,13 @@ export default function SearchKiosk() {
       {/* Header */}
       <div className="relative z-10 p-6">
         <div className="max-w-7xl mx-auto">
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h1 className="text-4xl font-bold text-white mb-2">
-                Music Search Kiosk
-              </h1>
-              <p className="text-slate-400">
-                Connected to: <span className="text-amber-500 font-mono">{kioskPlayerId}</span>
-              </p>
-            </div>
-            
-            <Button
-              onClick={handleModifyPlayerId}
-              variant="outline"
-              className="text-white border-white hover:bg-white/10"
-            >
-              <Edit className="w-4 h-4 mr-2" />
-              Change Player
-            </Button>
+          <div className="mb-6">
+            <h1 className="text-4xl font-bold text-white mb-2">
+              Music Search Kiosk
+            </h1>
+            <p className="text-slate-400">
+              Connected to: <span className="text-amber-500 font-mono">{kioskPlayerId}</span>
+            </p>
           </div>
           
           {/* Credits Display */}
@@ -728,6 +888,41 @@ export default function SearchKiosk() {
             >
               <Check className="w-4 h-4" />
               Yes, Add to Playlist
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Coin Acceptor Connection Dialog */}
+      <Dialog open={showCoinAcceptorDialog} onOpenChange={setShowCoinAcceptorDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Coin Acceptor Device Available</DialogTitle>
+            <DialogDescription>
+              A coin acceptor serial device has been detected.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="py-4">
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+              <p className="text-sm text-green-800 mb-2">
+                <strong>Device ID:</strong>
+              </p>
+              <p className="text-lg font-mono text-green-900">
+                {detectedCoinAcceptorId}
+              </p>
+            </div>
+            <p className="text-sm text-slate-600 mt-4">
+              Do you want to connect this device for accepting coin payments?
+            </p>
+          </div>
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={handleDeclineCoinAcceptor}>
+              No, Skip
+            </Button>
+            <Button onClick={handleConnectCoinAcceptor}>
+              Yes, Connect Device
             </Button>
           </DialogFooter>
         </DialogContent>

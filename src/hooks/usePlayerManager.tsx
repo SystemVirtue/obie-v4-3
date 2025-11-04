@@ -88,7 +88,29 @@ export const usePlayerManager = (
         exists: !!currentState.playerWindow,
         closed: currentState.playerWindow?.closed,
         isPlayerRunning: currentState.isPlayerRunning,
+        showMiniPlayer: currentState.showMiniPlayer,
       });
+
+      // If mini player is active, don't try to create emergency window
+      if (currentState.showMiniPlayer) {
+        console.log("[PlaySong] Mini player active, using embedded player");
+        // Just send the play command via localStorage for mini player
+        const commandData = {
+          videoId,
+          title,
+          artist,
+          action: "play",
+          timestamp: Date.now(),
+        };
+        localStorage.setItem("jukeboxCommand", JSON.stringify(commandData));
+        
+        // CRITICAL FIX: Update state with current song to prevent loading indicator
+        return {
+          ...currentState,
+          currentlyPlaying: title,
+          currentVideoId: videoId,
+        };
+      }
 
       // If no player window exists, try to create one immediately
       if (!currentState.playerWindow || currentState.playerWindow.closed) {
@@ -230,6 +252,7 @@ export const usePlayerManager = (
     // If mini player mode is active, don't initialize a window
     if (state.showMiniPlayer) {
       console.log("[InitPlayer] Mini player mode active, skipping window initialization");
+      setState((prev) => ({ ...prev, isPlayerRunning: true }));
       return;
     }
 
@@ -308,12 +331,47 @@ export const usePlayerManager = (
         }];
       }
 
+      // **NEW: Single display detection - use mini player instead**
+      if (displays.length === 1) {
+        console.log("[InitPlayer] Only one display detected - using mini player mode");
+        setState((prev) => ({ 
+          ...prev, 
+          showMiniPlayer: true,
+          isPlayerRunning: true 
+        }));
+        
+        toast({
+          title: "Single Display Detected",
+          description: "Using embedded mini player on this display",
+        });
+        
+        return; // Exit early, don't open separate window
+      }
+
       let targetDisplay = null;
       let useFullscreen = false;
 
       // Check if user has a default player display setting
       if (state.userDefaultPlayerDisplay) {
         console.log("[InitPlayer] Using user default player display:", state.userDefaultPlayerDisplay);
+        
+        // **FIXED: Check for "this-display" preference BEFORE searching displays array**
+        if (state.userDefaultPlayerDisplay.displayId === "this-display") {
+          console.log("[InitPlayer] User selected 'this-display' preference - using mini player mode");
+          setState((prev) => ({ 
+            ...prev, 
+            showMiniPlayer: true,
+            isPlayerRunning: true 
+          }));
+          
+          toast({
+            title: "Using Embedded Player",
+            description: "Player embedded in admin console as per saved preference",
+          });
+          
+          return; // Exit early, don't open separate window
+        }
+        
         const userDisplay = displays.find(d => d.id === state.userDefaultPlayerDisplay!.displayId);
         if (userDisplay) {
           targetDisplay = userDisplay;
@@ -455,6 +513,7 @@ export const usePlayerManager = (
             ...prev,
             playerWindow,
             isPlayerRunning: true,
+            showMiniPlayer: false, // MUTEX: Disable mini player when opening separate window
           }));
 
           /**
@@ -672,7 +731,12 @@ export const usePlayerManager = (
     );
 
     if (playerWindow) {
-      setState((prev) => ({ ...prev, playerWindow, isPlayerRunning: true }));
+      setState((prev) => ({ 
+        ...prev, 
+        playerWindow, 
+        isPlayerRunning: true,
+        showMiniPlayer: false, // MUTEX: Disable mini player when opening separate window
+      }));
       console.log("Basic player window opened successfully");
 
       setTimeout(() => {
@@ -796,6 +860,7 @@ export const usePlayerManager = (
         `[PerformSkip] Currently playing: ${currentState.currentlyPlaying}`,
       );
 
+      // Send skip command to both player window and mini player (via localStorage)
       if (currentState.playerWindow && !currentState.playerWindow.closed) {
         const command = {
           action: "fadeOutAndBlack",
@@ -808,12 +873,29 @@ export const usePlayerManager = (
             JSON.stringify(command),
           );
           addLog("SONG_PLAYED", `SKIPPING: ${currentState.currentlyPlaying}`);
-          console.log("[PerformSkip] Skip command sent successfully");
+          console.log("[PerformSkip] Skip command sent to player window");
         } catch (error) {
           console.error("Error sending skip command:", error);
         }
+      } else if (currentState.showMiniPlayer) {
+        // If using mini player, send command via localStorage
+        const command = {
+          action: "fadeOutAndBlack",
+          fadeDuration: 2000,
+          timestamp: Date.now(),
+        };
+        try {
+          localStorage.setItem(
+            "jukeboxCommand",
+            JSON.stringify(command),
+          );
+          addLog("SONG_PLAYED", `SKIPPING: ${currentState.currentlyPlaying}`);
+          console.log("[PerformSkip] Skip command sent to mini player");
+        } catch (error) {
+          console.error("Error sending skip command to mini player:", error);
+        }
       } else {
-        console.error("[PerformSkip] No player window available for skip");
+        console.error("[PerformSkip] No player window or mini player available for skip");
       }
 
       // Check if currently playing song is from priority queue
@@ -1037,6 +1119,21 @@ export const usePlayerManager = (
     });
   };
 
+  // Close the player window and clean up state
+  const closePlayerWindow = () => {
+    if (state.playerWindow && !state.playerWindow.closed) {
+      console.log("[PlayerManager] Closing separate player window");
+      state.playerWindow.close();
+      setState((prev) => ({ 
+        ...prev, 
+        playerWindow: null,
+        isPlayerRunning: false,
+        isPlayerPaused: false,
+      }));
+      addLog("SONG_PLAYED", "Player window closed");
+    }
+  };
+
   return {
     initializePlayer,
     playSong,
@@ -1049,5 +1146,6 @@ export const usePlayerManager = (
     handleDefaultPlaylistChange,
     handlePlaylistReorder,
     handlePlaylistShuffle,
+    closePlayerWindow,
   };
 };

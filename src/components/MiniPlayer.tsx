@@ -47,6 +47,8 @@ export const MiniPlayer = ({ videoId, showMiniPlayer, isMainPlayer = false }: Mi
   const playerRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const currentVideoIdRef = useRef<string>('');
+  const fadeTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const playerElementRef = useRef<HTMLDivElement>(null);
 
   // Load YouTube IFrame API
   useEffect(() => {
@@ -98,6 +100,19 @@ export const MiniPlayer = ({ videoId, showMiniPlayer, isMainPlayer = false }: Mi
           onReady: (event: any) => {
             console.log('[MiniPlayer] Player ready, video:', videoId);
             currentVideoIdRef.current = videoId;
+            
+            // Clear any ongoing fade when new video loads
+            if (fadeTimerRef.current) {
+              clearInterval(fadeTimerRef.current);
+              fadeTimerRef.current = null;
+              console.log('[MiniPlayer] Cleared ongoing fade for new video');
+            }
+            
+            // Reset opacity for new video
+            if (playerElementRef.current) {
+              playerElementRef.current.style.opacity = '1';
+            }
+            
             // Unmute for main player, mute for small overlay
             if (isMainPlayer) {
               event.target.unMute();
@@ -156,6 +171,179 @@ export const MiniPlayer = ({ videoId, showMiniPlayer, isMainPlayer = false }: Mi
     };
   }, [videoId, showMiniPlayer, isMainPlayer]);
 
+  // Listen for skip/fade commands via localStorage
+  useEffect(() => {
+    if (!showMiniPlayer || !isMainPlayer) {
+      return;
+    }
+
+    const fadeOutAndComplete = (statusType: string) => {
+      console.log('[MiniPlayer] Fading out with volume and opacity...');
+      
+      // Clear any existing fade timer
+      if (fadeTimerRef.current) {
+        clearInterval(fadeTimerRef.current);
+        fadeTimerRef.current = null;
+      }
+
+      if (!playerRef.current || !playerElementRef.current) {
+        console.warn('[MiniPlayer] Player not ready for fade');
+        return;
+      }
+
+      const startVolume = playerRef.current.getVolume();
+      const fadeSteps = 40; // 40 steps * 50ms = 2 seconds
+      const fadeInterval = 50; // ms per step
+      let currentStep = 0;
+
+      fadeTimerRef.current = setInterval(() => {
+        currentStep++;
+        const progress = currentStep / fadeSteps;
+
+        // Fade volume from startVolume to 0
+        const newVolume = startVolume * (1 - progress);
+        if (playerRef.current) {
+          playerRef.current.setVolume(Math.max(0, newVolume));
+        }
+
+        // Fade opacity from 1 to 0
+        const newOpacity = 1 - progress;
+        if (playerElementRef.current) {
+          playerElementRef.current.style.opacity = Math.max(0, newOpacity).toString();
+        }
+
+        if (currentStep >= fadeSteps) {
+          if (fadeTimerRef.current) {
+            clearInterval(fadeTimerRef.current);
+            fadeTimerRef.current = null;
+          }
+          console.log('[MiniPlayer] Fade complete, pausing video and sending status:', statusType);
+          
+          if (playerRef.current) {
+            playerRef.current.pauseVideo();
+            playerRef.current.setVolume(startVolume); // Restore volume for next song
+          }
+
+          // Send status via localStorage
+          const statusData = {
+            status: statusType,
+            title: statusType === 'fadeComplete' ? 'Fade complete' : 'Skip complete',
+            videoId: currentVideoIdRef.current,
+            id: currentVideoIdRef.current,
+            timestamp: Date.now()
+          };
+          
+          localStorage.setItem('jukeboxPlayerStatus', JSON.stringify(statusData));
+          currentVideoIdRef.current = '';
+          console.log('[MiniPlayer] Fade cleanup complete, ready for next video');
+        }
+      }, fadeInterval);
+    };
+
+    const fadeInAndComplete = () => {
+      console.log('[MiniPlayer] Fading in with volume and opacity...');
+      
+      // Clear any existing fade timer
+      if (fadeTimerRef.current) {
+        clearInterval(fadeTimerRef.current);
+        fadeTimerRef.current = null;
+      }
+
+      if (!playerRef.current || !playerElementRef.current) {
+        return;
+      }
+
+      const targetVolume = 100;
+      const fadeSteps = 20; // 20 steps * 50ms = 1 second (faster fade in)
+      const fadeInterval = 50;
+      let currentStep = 0;
+
+      fadeTimerRef.current = setInterval(() => {
+        currentStep++;
+        const progress = currentStep / fadeSteps;
+
+        // Fade volume from 0 to targetVolume
+        const newVolume = targetVolume * progress;
+        if (playerRef.current) {
+          playerRef.current.setVolume(Math.min(targetVolume, newVolume));
+        }
+
+        // Fade opacity from 0 to 1
+        const newOpacity = progress;
+        if (playerElementRef.current) {
+          playerElementRef.current.style.opacity = Math.min(1, newOpacity).toString();
+        }
+
+        if (currentStep >= fadeSteps) {
+          if (fadeTimerRef.current) {
+            clearInterval(fadeTimerRef.current);
+            fadeTimerRef.current = null;
+          }
+          console.log('[MiniPlayer] Fade in complete');
+        }
+      }, fadeInterval);
+    };
+
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'jukeboxCommand' && e.newValue) {
+        try {
+          const command = JSON.parse(e.newValue);
+          console.log('[MiniPlayer] Received command:', command.action);
+
+          switch (command.action) {
+            case 'fadeOutAndBlack':
+              fadeOutAndComplete('skipComplete');
+              break;
+            case 'fadeOut':
+              fadeOutAndComplete('fadeComplete');
+              break;
+            case 'pause':
+              fadeOutAndComplete('pauseComplete');
+              break;
+            case 'resume':
+              if (playerRef.current) {
+                playerRef.current.playVideo();
+                fadeInAndComplete();
+              }
+              break;
+          }
+        } catch (error) {
+          console.error('[MiniPlayer] Error parsing command:', error);
+        }
+      }
+    };
+
+    // Poll for localStorage changes (storage events don't fire in same window)
+    let lastCommand = localStorage.getItem('jukeboxCommand');
+    const pollInterval = setInterval(() => {
+      const currentCommand = localStorage.getItem('jukeboxCommand');
+      if (currentCommand !== lastCommand) {
+        lastCommand = currentCommand;
+        if (currentCommand) {
+          // Simulate storage event for polling-detected changes
+          handleStorageChange({
+            key: 'jukeboxCommand',
+            newValue: currentCommand,
+            oldValue: null,
+            url: window.location.href,
+            storageArea: localStorage,
+          } as StorageEvent);
+        }
+      }
+    }, 100); // Check every 100ms for responsiveness
+
+    window.addEventListener('storage', handleStorageChange);
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      clearInterval(pollInterval);
+      if (fadeTimerRef.current) {
+        clearInterval(fadeTimerRef.current);
+        fadeTimerRef.current = null;
+      }
+    };
+  }, [showMiniPlayer, isMainPlayer]);
+
   // Don't render if showMiniPlayer is false or no video ID
   if (!showMiniPlayer || !videoId) {
     return null;
@@ -173,7 +361,18 @@ export const MiniPlayer = ({ videoId, showMiniPlayer, isMainPlayer = false }: Mi
 
   return (
     <div className={containerClasses}>
-      <div className={playerClasses} ref={containerRef}>
+      <div 
+        className={playerClasses} 
+        ref={(el) => {
+          if (el) {
+            containerRef.current = el;
+            playerElementRef.current = el;
+            // Set initial opacity and transition
+            el.style.opacity = '1';
+            el.style.transition = 'opacity 0.05s ease-out';
+          }
+        }}
+      >
         {/* Vignette overlay for feathered edges (only for mini player) */}
         {!isMainPlayer && (
           <div className="absolute inset-0 rounded-lg shadow-[inset_0_0_30px_10px_rgba(0,0,0,0.6)] z-10 pointer-events-none"></div>

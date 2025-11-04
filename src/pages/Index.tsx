@@ -693,11 +693,13 @@ function Index() {
 
     // Check if user needs to select a display first
     // Show dialog if showDisplaySelectionDialogOnStartup is enabled (AutoOpenPlayer is FALSE)
-    const needsDisplaySelection = state.showDisplaySelectionDialogOnStartup;
+    // BUT: Skip dialog if mini player is active - mini player doesn't need display selection
+    const needsDisplaySelection = state.showDisplaySelectionDialogOnStartup && !state.showMiniPlayer;
 
     console.log("[Auto-init] Display selection check:", {
       userDefaultPlayerDisplay: state.userDefaultPlayerDisplay,
       showDisplaySelectionDialogOnStartup: state.showDisplaySelectionDialogOnStartup,
+      showMiniPlayer: state.showMiniPlayer,
       needsDisplaySelection
     });
 

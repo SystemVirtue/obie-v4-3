@@ -68,11 +68,10 @@ export const usePlayerInitialization = ({
     }
 
     // Check if conditions are met for autoplay
-    if (
-      state.inMemoryPlaylist.length > 0 &&
-      state.priorityQueue.length === 0 &&
-      !state.isPlayerPaused
-    ) {
+    // Allow autoplay either when playlist has songs OR when there's a priority queue
+    const hasContent = state.inMemoryPlaylist.length > 0 || state.priorityQueue.length > 0;
+    
+    if (hasContent && !state.isPlayerPaused) {
       // Only auto-start if nothing is currently playing and not already started
       // Also prevent autoplay if there's a player error
       const shouldAutoStart =
@@ -119,7 +118,7 @@ export const usePlayerInitialization = ({
           setTimeout(() => playNextSong(), 0);
         }
       }
-    } else if (state.inMemoryPlaylist.length === 0) {
+    } else if (state.inMemoryPlaylist.length === 0 && state.priorityQueue.length === 0) {
       // Reset flag if playlist is empty (allows restart when playlist reloads)
       if (hasStartedFirstSongRef.current) {
         console.log("[PlayerInit] Playlist empty, resetting autostart flag");

@@ -1365,10 +1365,12 @@ function Index() {
             closePlayerWindow();
             console.log("[Index] Mini player enabled - closed separate window");
             // IMPORTANT: Set isPlayerRunning to true to prevent loading indicator
+            // ALSO: Close display selection dialog if it's open
             setState((prev) => ({ 
               ...prev, 
               showMiniPlayer: true,
-              isPlayerRunning: true 
+              isPlayerRunning: true,
+              showDisplaySelectionDialog: false // Close dialog when enabling mini player
             }));
           } else {
             // Disabling mini player - prompt user to select display for separate window

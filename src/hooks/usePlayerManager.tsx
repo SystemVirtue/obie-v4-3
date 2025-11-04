@@ -462,12 +462,13 @@ export const usePlayerManager = (
             console.log("[InitPlayer] Player window closed by user");
             
             // Reset player state immediately when window closes
+            // BUT: If mini player is active, keep isPlayerRunning: true
             setState((prev) => ({
               ...prev,
               playerWindow: null,
-              isPlayerRunning: false,
-              showDisplaySelectionDialogOnStartup: true, // Force dialog on next startup
-              showDisplaySelectionDialog: true, // Show dialog immediately
+              isPlayerRunning: prev.showMiniPlayer ? true : false, // Keep running if mini player active
+              showDisplaySelectionDialogOnStartup: prev.showMiniPlayer ? false : true, // No dialog if mini player active
+              showDisplaySelectionDialog: prev.showMiniPlayer ? false : true, // No dialog if mini player active
             }));
             
             // DON'T save window state when user closes the window

@@ -256,6 +256,86 @@ export class YouTubeAPIClient {
   }
 
   /**
+   * Get detailed video information including category and embeddability
+   * Used for validation after search
+   * @param videoIds - Array of video IDs (max 50 per request)
+   * @param apiKey - YouTube API key
+   * @returns Record of video ID to video details
+   */
+  async getVideosDetails(videoIds: string[], apiKey: string): Promise<Record<string, {
+    categoryId: string;
+    isEmbeddable: boolean;
+    duration: string;
+    durationMinutes: number;
+  }>> {
+    if (videoIds.length === 0) return {};
+    if (videoIds.length > 50) {
+      console.warn(`[YouTube API] Batch request exceeds 50 videos (${videoIds.length}), truncating`);
+      videoIds = videoIds.slice(0, 50);
+    }
+
+    interface VideoDetailsResponse {
+      items: Array<{
+        id: string;
+        snippet: {
+          categoryId: string;
+        };
+        contentDetails: {
+          duration: string;
+        };
+        status: {
+          embeddable: boolean;
+        };
+      }>;
+    }
+
+    try {
+      const data = await this.makeRequest<VideoDetailsResponse>('videos', {
+        part: 'snippet,contentDetails,status',
+        id: videoIds.join(','),
+      }, apiKey);
+
+      const details: Record<string, {
+        categoryId: string;
+        isEmbeddable: boolean;
+        duration: string;
+        durationMinutes: number;
+      }> = {};
+
+      data.items.forEach(item => {
+        const formattedDuration = this.formatDuration(item.contentDetails.duration);
+        details[item.id] = {
+          categoryId: item.snippet.categoryId,
+          isEmbeddable: item.status.embeddable,
+          duration: formattedDuration,
+          durationMinutes: this.parseDurationToMinutes(formattedDuration),
+        };
+      });
+
+      console.log(`[YouTube API] Fetched details for ${data.items.length}/${videoIds.length} videos`);
+      return details;
+    } catch (error) {
+      console.error('[YouTube API] Error fetching video details:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Parse formatted duration (e.g., "4:13" or "1:23:45") to minutes
+   */
+  private parseDurationToMinutes(duration: string): number {
+    const parts = duration.split(':').map(Number);
+    if (parts.length === 2) {
+      // MM:SS format
+      return parts[0] + (parts[1] > 30 ? 1 : 0);
+    } else if (parts.length === 3) {
+      // HH:MM:SS format
+      return parts[0] * 60 + parts[1] + (parts[2] > 30 ? 1 : 0);
+    }
+    return 0;
+  }
+
+  /**
    * Convert ISO 8601 duration to readable format (e.g., "4:13")
    */
   private formatDuration(isoDuration: string): string {

@@ -148,7 +148,7 @@ export const useVideoSearch = (
       const searchResults = await musicSearchService.search(
         query,
         effectiveMethod,
-        undefined, // No API key needed
+        state.apiKey, // Pass API key for validation
         48,
       );
 
@@ -182,7 +182,7 @@ export const useVideoSearch = (
           const fallbackResults = await musicSearchService.search(
             query,
             "iframe_search",
-            undefined,
+            undefined, // iframe_search doesn't use API
             48,
           );
 

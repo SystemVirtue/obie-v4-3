@@ -30,6 +30,7 @@ import { useVideoSearch } from "@/hooks/useVideoSearch";
 import { useApiKeyRotation } from "@/hooks/useApiKeyRotation";
 import { useKioskRequests } from "@/hooks/useKioskRequests";
 import { useKioskCredits } from "@/hooks/useKioskCredits";
+import { useBackgroundSync } from "@/hooks/useBackgroundSync";
 import { LoadingIndicator } from "@/components/LoadingIndicator";
 import { CreditsDisplay } from "@/components/CreditsDisplay";
 import { DisplayConfirmationDialog } from "@/components/DisplayConfirmationDialog";
@@ -104,6 +105,7 @@ function Index() {
     handleUpdateBackgroundQueueItem,
     handleTestBackgroundQueue,
     handleBackgroundSettingsChange,
+    refreshBackgrounds,
     upcomingTitles,
     isCurrentSongUserRequest,
     getCurrentPlaylistForDisplay,
@@ -120,6 +122,7 @@ function Index() {
     handlePlayerToggle,
     handleSkipSong,
     performSkip,
+    closePlayerWindow,
   } = usePlayerManager(
     state,
     setState,
@@ -408,6 +411,25 @@ function Index() {
     checkAndRotateIfNeeded,
   );
 
+  /**
+   * Wrapper for confirmAddToPlaylist that ensures /index page always has sufficient credits
+   * On /index page, DJ/admin should be able to add songs regardless of credit balance
+   */
+  const handleIndexConfirmAddToPlaylist = useCallback(() => {
+    // Temporarily add 1 credit before confirmation
+    // This credit will be immediately deducted by confirmAddToPlaylist
+    // Net result: credit balance unchanged, but song is added successfully
+    setState((prev) => ({
+      ...prev,
+      credits: prev.credits + 1,
+    }));
+    
+    console.log("[Index] Added temporary credit before song confirmation");
+    
+    // Call the original confirmAddToPlaylist - it will deduct the credit we just added
+    confirmAddToPlaylist();
+  }, [setState, confirmAddToPlaylist]);
+
   // Kiosk integration - register player and listen for song requests
   useKioskRequests({
     playerId: state.playerIdentifier,
@@ -501,6 +523,15 @@ function Index() {
           bgVisualMode: state.bgVisualMode,
         }
   );
+
+  // Background sync hook - uploads background settings to Supabase for kiosk synchronization
+  useBackgroundSync({
+    playerIdentifier: state.playerIdentifier,
+    backgroundType: getCurrentBackground().type,
+    backgroundImageUrl: getCurrentBackground().type === 'image' ? getCurrentBackground().url : undefined,
+    backgroundVideoUrl: getCurrentBackground().type === 'video' ? getCurrentBackground().url : undefined,
+    backgroundQueue: state.backgroundQueue,
+  });
 
   // Use serial communication hook with new props
   useSerialCommunication({
@@ -833,6 +864,7 @@ function Index() {
     <BackgroundDisplay
       background={currentBackground}
       backgroundSettings={state.backgroundSettings}
+      disabled={state.showMiniPlayer} // Disable backgrounds when mini player is active
       onVideoEnd={() => {
         // Advance to next background in queue
         const nextIndex = (state.backgroundQueueIndex + 1) % state.backgroundQueue.length;
@@ -841,16 +873,16 @@ function Index() {
     >
       <LoadingIndicator isVisible={isLoading} />
       <CreditsDisplay credits={state.credits} mode={state.mode} />
-      <div className="relative z-10 min-h-screen p-8 flex flex-col">
+      <div className="relative z-10 min-h-screen px-2 py-2 sm:p-8 flex flex-col">
         {/* Now Playing Ticker */}
         <NowPlayingTicker currentlyPlaying={state.currentlyPlaying} />
 
-        {/* Player Status Display */}
-        <PlayerStatusDisplay 
+        {/* Player Status Display - Hidden (not needed with mini player) */}
+        {/* <PlayerStatusDisplay 
           playerStatus={state.playerStatus} 
           isPlayerRunning={state.isPlayerRunning}
           playerWindow={state.playerWindow}
-        />
+        /> */}
 
         {/* Credits display has been moved to the CreditsDisplay component */}
 
@@ -974,6 +1006,7 @@ function Index() {
           onInsufficientCredits={() =>
             setState((prev) => ({ ...prev, showInsufficientCredits: true }))
           }
+          bypassCreditCheck={true}
         />
       ) : (
         <SearchInterface
@@ -1013,6 +1046,7 @@ function Index() {
           onInsufficientCredits={() =>
             setState((prev) => ({ ...prev, showInsufficientCredits: true }))
           }
+          bypassCreditCheck={true}
         />
       )}
 
@@ -1102,7 +1136,7 @@ function Index() {
               No
             </Button>
             <Button
-              onClick={confirmAddToPlaylist}
+              onClick={handleIndexConfirmAddToPlaylist}
               className="flex items-center gap-2 bg-green-600 hover:bg-green-700"
             >
               <Check className="w-4 h-4" />
@@ -1178,6 +1212,7 @@ function Index() {
         currentTestIndex={state.currentTestIndex}
         backgroundSettings={state.backgroundSettings}
         onBackgroundSettingsChange={handleBackgroundSettingsChange}
+        onRefreshBackgrounds={refreshBackgrounds}
         onBackgroundUpload={handleBackgroundUpload}
         onAddLog={addLog}
         onAddUserRequest={addUserRequest}
@@ -1324,9 +1359,27 @@ function Index() {
         currentlyPlaying={state.currentlyPlaying}
         priorityQueue={state.priorityQueue}
         showMiniPlayer={state.showMiniPlayer}
-        onShowMiniPlayerChange={(show) =>
-          setState((prev) => ({ ...prev, showMiniPlayer: show }))
-        }
+        onShowMiniPlayerChange={(show) => {
+          // MUTEX: If enabling mini player, close any separate player window
+          if (show) {
+            closePlayerWindow();
+            console.log("[Index] Mini player enabled - closed separate window");
+            // IMPORTANT: Set isPlayerRunning to true to prevent loading indicator
+            setState((prev) => ({ 
+              ...prev, 
+              showMiniPlayer: true,
+              isPlayerRunning: true 
+            }));
+          } else {
+            // Disabling mini player - prompt user to select display for separate window
+            console.log("[Index] Mini player disabled - opening display selection dialog");
+            setState((prev) => ({ 
+              ...prev, 
+              showMiniPlayer: false,
+              showDisplaySelectionDialog: true // Prompt for display selection
+            }));
+          }
+        }}
         testMode={state.testMode}
         onTestModeChange={(testMode) =>
           setState((prev) => ({ ...prev, testMode: testMode }))

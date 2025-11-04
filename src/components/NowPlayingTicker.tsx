@@ -84,10 +84,10 @@ export const PlayerStatusDisplay = ({ playerStatus, isPlayerRunning, playerWindo
   const actualStatus = getActualPlayerStatus();
 
   return (
-    <div className="absolute top-2 right-2 sm:top-4 sm:right-4 z-20">
+    <div className="absolute top-12 right-2 sm:top-4 sm:right-4 z-20">
       <Card className={`bg-black/60 ${getStatusColor(actualStatus.state)} shadow-lg backdrop-blur-sm`}>
         <CardContent className="p-2 sm:p-3">
-          <div className="text-white font-bold text-sm sm:text-base">
+          <div className="text-white font-bold text-xs sm:text-base">
             Player Status: {actualStatus.state} {actualStatus.description}
           </div>
         </CardContent>

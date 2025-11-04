@@ -49,6 +49,8 @@ export const MiniPlayer = ({ videoId, showMiniPlayer, isMainPlayer = false }: Mi
   const currentVideoIdRef = useRef<string>('');
   const fadeTimerRef = useRef<NodeJS.Timeout | null>(null);
   const playerElementRef = useRef<HTMLDivElement>(null);
+  const isPlayerReadyRef = useRef<boolean>(false);
+  const pendingVideoIdRef = useRef<string>('');
 
   // Load YouTube IFrame API
   useEffect(() => {
@@ -98,6 +100,7 @@ export const MiniPlayer = ({ videoId, showMiniPlayer, isMainPlayer = false }: Mi
         events: {
           onReady: (event: any) => {
             console.log('[MiniPlayer] Player ready');
+            isPlayerReadyRef.current = true;
             
             // Unmute for main player, mute for small overlay
             if (isMainPlayer) {
@@ -105,6 +108,19 @@ export const MiniPlayer = ({ videoId, showMiniPlayer, isMainPlayer = false }: Mi
               event.target.setVolume(100);
             } else {
               event.target.mute();
+            }
+
+            // Load pending video if one was queued
+            if (pendingVideoIdRef.current) {
+              console.log('[MiniPlayer] Loading pending video:', pendingVideoIdRef.current);
+              const videoToLoad = pendingVideoIdRef.current;
+              pendingVideoIdRef.current = '';
+              currentVideoIdRef.current = videoToLoad;
+              
+              event.target.loadVideoById({
+                videoId: videoToLoad,
+                startSeconds: 0
+              });
             }
           },
           onStateChange: (event: any) => {
@@ -167,6 +183,8 @@ export const MiniPlayer = ({ videoId, showMiniPlayer, isMainPlayer = false }: Mi
       if (playerRef.current) {
         playerRef.current.destroy();
         playerRef.current = null;
+        isPlayerReadyRef.current = false;
+        pendingVideoIdRef.current = '';
       }
     };
   }, [showMiniPlayer, isMainPlayer]);
@@ -184,7 +202,6 @@ export const MiniPlayer = ({ videoId, showMiniPlayer, isMainPlayer = false }: Mi
     }
 
     console.log('[MiniPlayer] Loading new video:', videoId);
-    currentVideoIdRef.current = videoId;
 
     // Clear any ongoing fade when new video loads
     if (fadeTimerRef.current) {
@@ -198,7 +215,15 @@ export const MiniPlayer = ({ videoId, showMiniPlayer, isMainPlayer = false }: Mi
       playerElementRef.current.style.opacity = '1';
     }
 
+    // Check if player is ready
+    if (!isPlayerReadyRef.current) {
+      console.log('[MiniPlayer] Player not ready yet, queuing video:', videoId);
+      pendingVideoIdRef.current = videoId;
+      return;
+    }
+
     // Load the new video
+    currentVideoIdRef.current = videoId;
     try {
       if (playerRef.current.loadVideoById) {
         playerRef.current.loadVideoById({

@@ -81,6 +81,8 @@ export const useStorageSync = ({
    */
   const handleStorageChange = useCallback(
     (event: StorageEvent) => {
+      console.log("[StorageSync] handleStorageChange called, key:", event.key, "hasNewValue:", !!event.newValue);
+      
       // Handle jukeboxStatus events (player status updates)
       if (event.key === "jukeboxStatus" && event.newValue) {
         try {
@@ -355,9 +357,15 @@ export const useStorageSync = ({
     
     // Poll for localStorage changes (storage events don't fire in same window)
     let lastStatus = localStorage.getItem('jukeboxStatus');
+    console.log('[StorageSync] Starting polling, initial status:', lastStatus ? JSON.parse(lastStatus).status : 'null');
+    
     const pollInterval = setInterval(() => {
       const currentStatus = localStorage.getItem('jukeboxStatus');
       if (currentStatus !== lastStatus) {
+        console.log('[StorageSync] Poll detected change!', {
+          old: lastStatus ? JSON.parse(lastStatus).status : 'null',
+          new: currentStatus ? JSON.parse(currentStatus).status : 'null'
+        });
         lastStatus = currentStatus;
         if (currentStatus) {
           // Simulate storage event for polling-detected changes

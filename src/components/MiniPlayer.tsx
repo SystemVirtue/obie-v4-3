@@ -60,9 +60,9 @@ export const MiniPlayer = ({ videoId, showMiniPlayer, isMainPlayer = false }: Mi
     }
   }, []);
 
-  // Initialize player when API is ready
+  // Initialize player when API is ready (only once)
   useEffect(() => {
-    if (!showMiniPlayer || !videoId || !containerRef.current) {
+    if (!showMiniPlayer || !containerRef.current) {
       return;
     }
 
@@ -72,9 +72,9 @@ export const MiniPlayer = ({ videoId, showMiniPlayer, isMainPlayer = false }: Mi
         return;
       }
 
-      // Destroy existing player if present
+      // Only create player if it doesn't exist
       if (playerRef.current) {
-        playerRef.current.destroy();
+        return;
       }
 
       // Create player div
@@ -83,7 +83,6 @@ export const MiniPlayer = ({ videoId, showMiniPlayer, isMainPlayer = false }: Mi
       containerRef.current?.appendChild(playerDiv);
 
       playerRef.current = new window.YT.Player(playerDiv, {
-        videoId: videoId,
         width: '100%',
         height: '100%',
         playerVars: {
@@ -98,20 +97,7 @@ export const MiniPlayer = ({ videoId, showMiniPlayer, isMainPlayer = false }: Mi
         },
         events: {
           onReady: (event: any) => {
-            console.log('[MiniPlayer] Player ready, video:', videoId);
-            currentVideoIdRef.current = videoId;
-            
-            // Clear any ongoing fade when new video loads
-            if (fadeTimerRef.current) {
-              clearInterval(fadeTimerRef.current);
-              fadeTimerRef.current = null;
-              console.log('[MiniPlayer] Cleared ongoing fade for new video');
-            }
-            
-            // Reset opacity for new video
-            if (playerElementRef.current) {
-              playerElementRef.current.style.opacity = '1';
-            }
+            console.log('[MiniPlayer] Player ready');
             
             // Unmute for main player, mute for small overlay
             if (isMainPlayer) {
@@ -120,7 +106,6 @@ export const MiniPlayer = ({ videoId, showMiniPlayer, isMainPlayer = false }: Mi
             } else {
               event.target.mute();
             }
-            event.target.playVideo();
           },
           onStateChange: (event: any) => {
             const state = event.data;
@@ -139,8 +124,12 @@ export const MiniPlayer = ({ videoId, showMiniPlayer, isMainPlayer = false }: Mi
                 timestamp: Date.now()
               };
               
-              localStorage.setItem('jukeboxPlayerStatus', JSON.stringify(statusData));
+              localStorage.setItem('jukeboxStatus', JSON.stringify(statusData));
               console.log('[MiniPlayer] Sent ended status:', statusData);
+            }
+            // YT.PlayerState.PLAYING = 1
+            else if (state === 1) {
+              console.log('[MiniPlayer] Video playing:', currentVideoIdRef.current);
             }
           },
           onError: (event: any) => {
@@ -155,7 +144,7 @@ export const MiniPlayer = ({ videoId, showMiniPlayer, isMainPlayer = false }: Mi
               timestamp: Date.now()
             };
             
-            localStorage.setItem('jukeboxPlayerStatus', JSON.stringify(statusData));
+            localStorage.setItem('jukeboxStatus', JSON.stringify(statusData));
           }
         }
       });
@@ -169,7 +158,42 @@ export const MiniPlayer = ({ videoId, showMiniPlayer, isMainPlayer = false }: Mi
         playerRef.current = null;
       }
     };
-  }, [videoId, showMiniPlayer, isMainPlayer]);
+  }, [showMiniPlayer, isMainPlayer]);
+
+  // Load new video when videoId changes
+  useEffect(() => {
+    if (!showMiniPlayer || !videoId || !playerRef.current) {
+      return;
+    }
+
+    console.log('[MiniPlayer] Loading new video:', videoId);
+    currentVideoIdRef.current = videoId;
+
+    // Clear any ongoing fade when new video loads
+    if (fadeTimerRef.current) {
+      clearInterval(fadeTimerRef.current);
+      fadeTimerRef.current = null;
+      console.log('[MiniPlayer] Cleared ongoing fade for new video');
+    }
+
+    // Reset opacity for new video
+    if (playerElementRef.current) {
+      playerElementRef.current.style.opacity = '1';
+    }
+
+    // Load the new video
+    try {
+      if (playerRef.current.loadVideoById) {
+        playerRef.current.loadVideoById({
+          videoId: videoId,
+          startSeconds: 0
+        });
+        console.log('[MiniPlayer] Video loaded successfully');
+      }
+    } catch (error) {
+      console.error('[MiniPlayer] Error loading video:', error);
+    }
+  }, [videoId, showMiniPlayer]);
 
   // Listen for skip/fade commands via localStorage
   useEffect(() => {
@@ -233,7 +257,7 @@ export const MiniPlayer = ({ videoId, showMiniPlayer, isMainPlayer = false }: Mi
             timestamp: Date.now()
           };
           
-          localStorage.setItem('jukeboxPlayerStatus', JSON.stringify(statusData));
+          localStorage.setItem('jukeboxStatus', JSON.stringify(statusData));
           currentVideoIdRef.current = '';
           console.log('[MiniPlayer] Fade cleanup complete, ready for next video');
         }

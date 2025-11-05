@@ -4,8 +4,21 @@ import path from "path";
 import { componentTagger } from "lovable-tagger";
 import { VitePWA } from "vite-plugin-pwa";
 import { fileURLToPath } from 'url';
+import { existsSync } from 'fs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Handle Render.com's unusual directory structure where repo is checked out to /opt/render/project/src
+// If __dirname already ends with 'src', don't append it again
+const srcPath = __dirname.endsWith('src') 
+  ? __dirname 
+  : path.resolve(__dirname, 'src');
+
+// Verify the path exists, fallback to __dirname/src if needed
+const resolvedSrcPath = existsSync(path.join(srcPath, 'main.tsx'))
+  ? srcPath
+  : path.resolve(__dirname, 'src');
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
@@ -45,7 +58,7 @@ export default defineConfig(({ mode }) => ({
   ].filter(Boolean),
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "src"),
+      "@": resolvedSrcPath,
     },
   },
   define: {

@@ -6,6 +6,7 @@
   "scripts": {
     "predev": "node scripts/start-proxy.cjs",
     "dev": "vite",
+    "prebuild": "echo '=== Build Environment ===' && pwd && echo '=== Checking src/components/ui ===' && ls -la src/components/ui/ | head -20 || echo 'src/components/ui not found'",
     "build": "vite build",
     "build:dev": "vite build --mode development",
     "lint": "eslint .",

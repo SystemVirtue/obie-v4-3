@@ -21,10 +21,10 @@ const isConfigInSrc = path.basename(__dirname) === 'src';
 console.log('[Vite Config] parentDir:', parentDir);
 console.log('[Vite Config] isConfigInSrc:', isConfigInSrc);
 
-// If config is in src directory, the SOURCE FILES are actually in the SAME directory
-// NOT in a subdirectory. So srcPath should be __dirname (we're already in src).
-// If config is NOT in src (normal case), srcPath should be __dirname/src
-const srcPath = isConfigInSrc ? __dirname : path.join(__dirname, 'src');
+// IMPORTANT: Even when config is in "src" directory on Render,
+// the actual source files are in src/src/ (doubled path)
+// So we ALWAYS need to append 'src' to get to the source files
+const srcPath = path.join(__dirname, 'src');
 
 console.log('[Vite Config] Resolved srcPath:', srcPath);
 console.log('[Vite Config] main.tsx exists:', existsSync(path.join(srcPath, 'main.tsx')));

@@ -4,21 +4,32 @@ import path from "path";
 import { componentTagger } from "lovable-tagger";
 import { VitePWA } from "vite-plugin-pwa";
 import { fileURLToPath } from 'url';
-import { existsSync } from 'fs';
+import { existsSync, readdirSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Handle Render.com's unusual directory structure where repo is checked out to /opt/render/project/src
-// If __dirname already ends with 'src', don't append it again
-const srcPath = __dirname.endsWith('src') 
-  ? __dirname 
-  : path.resolve(__dirname, 'src');
+// Debug logging for Render
+console.log('[Vite Config] __dirname:', __dirname);
+console.log('[Vite Config] __filename:', __filename);
 
-// Verify the path exists, fallback to __dirname/src if needed
-const resolvedSrcPath = existsSync(path.join(srcPath, 'main.tsx'))
-  ? srcPath
-  : path.resolve(__dirname, 'src');
+// Check if we're already in the src directory (Render's structure)
+const isInSrcDir = existsSync(path.join(__dirname, 'main.tsx'));
+const srcPath = isInSrcDir ? __dirname : path.join(__dirname, 'src');
+
+console.log('[Vite Config] isInSrcDir:', isInSrcDir);
+console.log('[Vite Config] Resolved srcPath:', srcPath);
+console.log('[Vite Config] main.tsx exists:', existsSync(path.join(srcPath, 'main.tsx')));
+
+// Verify hooks directory
+const hooksPath = path.join(srcPath, 'hooks');
+console.log('[Vite Config] hooksPath:', hooksPath);
+console.log('[Vite Config] hooks directory exists:', existsSync(hooksPath));
+
+if (existsSync(hooksPath)) {
+  const hookFiles = readdirSync(hooksPath).filter(f => f.includes('Background'));
+  console.log('[Vite Config] Background hook files:', hookFiles);
+}
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
@@ -58,7 +69,7 @@ export default defineConfig(({ mode }) => ({
   ].filter(Boolean),
   resolve: {
     alias: {
-      "@": resolvedSrcPath,
+      "@": srcPath,
     },
   },
   define: {

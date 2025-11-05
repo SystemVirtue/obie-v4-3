@@ -37,6 +37,19 @@ if (existsSync(hooksPath)) {
   console.log('[Vite Config] Background hook files:', hookFiles);
 }
 
+// Verify components/ui directory for troubleshooting
+const uiPath = path.join(srcPath, 'components', 'ui');
+console.log('[Vite Config] UI components path:', uiPath);
+console.log('[Vite Config] UI directory exists:', existsSync(uiPath));
+
+if (existsSync(uiPath)) {
+  const uiFiles = readdirSync(uiPath);
+  console.log('[Vite Config] UI files count:', uiFiles.length);
+  console.log('[Vite Config] UI files (first 20):', uiFiles.slice(0, 20));
+  const toasterFiles = uiFiles.filter(f => f.toLowerCase().includes('toast'));
+  console.log('[Vite Config] Toast-related files:', toasterFiles);
+}
+
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
   server: {

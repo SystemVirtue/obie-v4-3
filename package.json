@@ -6,8 +6,8 @@
   "scripts": {
     "predev": "node scripts/start-proxy.cjs",
     "dev": "vite",
-    "prebuild": "echo '=== Build Environment ===' && pwd && echo '=== Checking src/components/ui ===' && ls -la src/components/ui/ | head -20 || echo 'src/components/ui not found'",
-    "build": "vite build",
+    "prebuild": "echo '=== Build Environment ===' && pwd && echo '=== Root files ===' && ls -la | head -10 && echo '=== Checking ./components/ui ===' && ls -la ./components/ui/ 2>&1 | head -10 && echo '=== Checking src/components/ui ===' && ls -la src/components/ui/ 2>&1 | head -10",
+    "build": "vite build --force",
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
     "preview": "vite preview",

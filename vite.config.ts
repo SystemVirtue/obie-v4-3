@@ -77,6 +77,7 @@ export default defineConfig(({ mode }) => ({
     alias: {
       "@": srcPath,
     },
+    extensions: ['.mjs', '.js', '.mts', '.ts', '.jsx', '.tsx', '.json'],
   },
   define: {
     global: "globalThis",

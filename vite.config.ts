@@ -13,11 +13,17 @@ const __dirname = path.dirname(__filename);
 console.log('[Vite Config] __dirname:', __dirname);
 console.log('[Vite Config] __filename:', __filename);
 
-// Check if we're already in the src directory (Render's structure)
-const isInSrcDir = existsSync(path.join(__dirname, 'main.tsx'));
-const srcPath = isInSrcDir ? __dirname : path.join(__dirname, 'src');
+// Check if vite.config.ts is already in the src directory
+// This happens on Render where the repo is checked out to /opt/render/project/src
+const parentDir = path.dirname(__dirname);
+const isConfigInSrc = path.basename(__dirname) === 'src';
 
-console.log('[Vite Config] isInSrcDir:', isInSrcDir);
+console.log('[Vite Config] parentDir:', parentDir);
+console.log('[Vite Config] isConfigInSrc:', isConfigInSrc);
+
+// If config is already in src, use __dirname, otherwise use __dirname/src
+const srcPath = isConfigInSrc ? __dirname : path.join(__dirname, 'src');
+
 console.log('[Vite Config] Resolved srcPath:', srcPath);
 console.log('[Vite Config] main.tsx exists:', existsSync(path.join(srcPath, 'main.tsx')));
 
